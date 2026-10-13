@@ -1,0 +1,38 @@
+# 构建目录（CMake 全部产物，含可执行文件）
+build/
+cmake-build-*/
+out/
+
+# CMake 单独散落的文件（防止在根目录直接 cmake 生成）
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+
+# 编译中间产物与库文件
+*.o
+*.so
+*.so.*
+*.a
+*.dylib
+*.dll
+*.exe
+http_server
+
+# IDE / 编辑器
+.vscode/
+.idea/
+.vs/
+*.swp
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+*.tmp

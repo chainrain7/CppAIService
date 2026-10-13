@@ -1,0 +1,37 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: cppai-mysql
+    # 密码与 ChatServer.cpp:37 写死的 "root"/"123456" 保持一致；
+    # 若你改了这里的密码，记得同步改代码
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: "ChatHttpServer"
+      TZ: "Asia/Shanghai"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./init:/docker-entrypoint-initdb.d:ro   # 首次启动自动执行建库建表
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: cppai-rabbitmq
+    environment:
+      # 与 MQManager.cpp 里的 guest/guest 一致
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+    ports:
+      - "5672:5672"     # AMQP 端口（应用连接用）
+      - "15672:15672"   # 管理界面：浏览器打开 http://localhost:15672 (guest/guest)
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  rabbitmq-data:
