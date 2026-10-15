@@ -3,232 +3,248 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI 智能助手</title>
+<title>CppAI · 登录</title>
+<link rel="stylesheet" href="/assets/style.css">
 <style>
-    /* 全局样式 */
     body {
-        font-family: "Microsoft YaHei", Arial, sans-serif;
-        margin: 0;
-        padding: 0;
         display: flex;
-        justify-content: center;
         align-items: center;
-        height: 100vh;
-        background-color: #f5f5f5;
-        color: #333;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 20px;
     }
 
-    h1.title {
-        font-size: 36px;
-        font-weight: bold;
-        text-align: center;
-        margin-bottom: 30px;
-        background: linear-gradient(to right, #007bff, #00c6ff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+    .auth-wrap { width: 400px; max-width: 100%; animation: fadeUp 0.5s ease; }
+
+    .auth-brand { justify-content: center; display: flex; font-size: 20px; margin-bottom: 8px; }
+    .auth-sub {
+        text-align: center; color: var(--muted); font-size: 13px;
+        margin: 0 0 28px; letter-spacing: 1px;
     }
 
-    .container {
-        width: 360px;
-        padding: 25px;
-        background: #ffffff;
-        border-radius: 15px;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-        box-sizing: border-box;
-        text-align: center;
-        transition: all 0.3s;
+    .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 30px 32px 26px;
+        backdrop-filter: blur(14px);
+        box-shadow: var(--shadow-2);
     }
 
-    .container:hover {
-        box-shadow: 0 12px 25px rgba(0,0,0,0.15);
+    /* 登录/注册切换 */
+    .tabs {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: var(--radius-sm);
+        padding: 4px;
+        margin-bottom: 24px;
     }
-
-    h2 {
-        font-size: 24px;
-        margin-bottom: 20px;
-        color: #333;
+    .tabs-indicator {
+        position: absolute;
+        top: 4px; left: 4px;
+        width: calc(50% - 4px);
+        height: calc(100% - 8px);
+        background: var(--grad);
+        border-radius: 7px;
+        transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 3px 12px rgba(109, 124, 255, 0.4);
     }
-
-    .form-group {
-        margin-bottom: 18px;
-        text-align: left;
-    }
-
-    .form-group label {
-        display: block;
-        font-size: 14px;
-        color: #555;
-        margin-bottom: 5px;
-    }
-
-    .form-group input {
-        width: calc(100% - 20px);
-        padding: 10px;
-        font-size: 14px;
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        background: #f9f9f9;
-        outline: none;
-        transition: all 0.2s;
-    }
-
-    .form-group input:focus {
-        border-color: #007bff;
-        box-shadow: 0 0 8px rgba(0,123,255,0.3);
-        background: #fff;
-    }
-
-    .btn {
-        width: 100%;
-        padding: 12px;
-        font-size: 16px;
-        background-color: #007bff;
-        color: #fff;
+    .tabs.reg .tabs-indicator { transform: translateX(100%); }
+    .tabs button {
+        position: relative;
+        z-index: 1;
+        padding: 9px 0;
         border: none;
-        border-radius: 10px;
-        cursor: pointer;
-        font-weight: bold;
-        transition: all 0.3s;
-    }
-
-    .btn:hover {
-        background-color: #0056b3;
-        transform: scale(1.03);
-    }
-
-    .switch {
-        margin-top: 15px;
+        background: none;
+        color: var(--muted);
         font-size: 14px;
-        color: #666;
-    }
-
-    .switch a {
-        color: #007bff;
-        text-decoration: none;
+        font-weight: 600;
+        font-family: var(--font);
         cursor: pointer;
+        transition: color 0.2s;
     }
+    .tabs.reg button:first-child, .tabs:not(.reg) button:last-child { color: var(--muted); }
+    .tabs:not(.reg) button:first-child, .tabs.reg button:last-child { color: #fff; }
 
-    .switch a:hover { text-decoration: underline; }
+    .btn { width: 100%; padding: 12px; font-size: 15px; margin-top: 6px; }
+    .btn .spinner { display: none; }
+    .btn.loading .spinner { display: inline-block; }
+    .btn.loading .btn-label { opacity: 0.7; }
 
-    #register-container { display: none; }
+    .switch-hint {
+        text-align: center;
+        margin-top: 18px;
+        font-size: 13px;
+        color: var(--muted);
+    }
+    .switch-hint a { cursor: pointer; font-weight: 600; }
 
-    /* 成功提示框 */
-    #success-alert {
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: #007bff;
-        color: #fff;
-        padding: 12px 25px;
-        border-radius: 10px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-        display: none;
-        z-index: 1000;
-        font-weight: bold;
+    .footer-note {
+        text-align: center;
+        margin-top: 26px;
+        font-size: 12px;
+        color: var(--muted-2);
+        letter-spacing: 0.5px;
     }
 </style>
 </head>
 <body>
-<div id="success-alert">提示信息</div>
+<div class="auth-wrap">
+    <div class="auth-brand">
+        <span class="brand"><span class="brand-mark">◈</span>CppAI</span>
+    </div>
+    <p class="auth-sub">C++ AI 应用服务平台</p>
 
-<div>
-    <h1 class="title">AI 智能助手</h1>
+    <div class="card">
+        <div class="tabs" id="tabs">
+            <div class="tabs-indicator"></div>
+            <button type="button" id="tab-login">登 录</button>
+            <button type="button" id="tab-register">注 册</button>
+        </div>
 
-    <!-- 登录 -->
-    <div class="container" id="login-container">
-        <h2>登录</h2>
+        <!-- 登录 -->
         <form id="login-form">
-            <div class="form-group">
+            <div class="field">
                 <label for="login-username">用户名</label>
-                <input type="text" id="login-username" placeholder="请输入用户名" required>
+                <input type="text" id="login-username" placeholder="请输入用户名" autocomplete="username" required>
             </div>
-            <div class="form-group">
+            <div class="field">
                 <label for="login-password">密码</label>
-                <input type="password" id="login-password" placeholder="请输入密码" required>
+                <input type="password" id="login-password" placeholder="请输入密码" autocomplete="current-password" required>
             </div>
-            <button type="submit" class="btn">登录</button>
+            <button type="submit" class="btn" id="login-btn">
+                <span class="spinner"></span><span class="btn-label">进入平台</span>
+            </button>
         </form>
-        <div class="switch">
-            没有账号？<a onclick="showRegister()">去注册账号</a>
+
+        <!-- 注册 -->
+        <form id="register-form" style="display:none">
+            <div class="field">
+                <label for="register-username">用户名</label>
+                <input type="text" id="register-username" placeholder="设置用户名" autocomplete="username" required>
+            </div>
+            <div class="field">
+                <label for="register-password">密码</label>
+                <input type="password" id="register-password" placeholder="设置密码" autocomplete="new-password" required>
+            </div>
+            <button type="submit" class="btn" id="register-btn">
+                <span class="spinner"></span><span class="btn-label">创建账号</span>
+            </button>
+        </form>
+
+        <div class="switch-hint" id="switch-hint">
+            还没有账号？<a id="switch-to-register">立即注册</a>
         </div>
     </div>
 
-    <!-- 注册 -->
-    <div class="container" id="register-container">
-        <h2>注册</h2>
-        <form id="register-form">
-            <div class="form-group">
-                <label for="register-username">用户名</label>
-                <input type="text" id="register-username" placeholder="请输入用户名" required>
-            </div>
-            <div class="form-group">
-                <label for="register-password">密码</label>
-                <input type="password" id="register-password" placeholder="请输入密码" required>
-            </div>
-            <button type="submit" class="btn">注册</button>
-        </form>
-        <div class="switch">
-            已有账号？<a onclick="showLogin()">返回登录</a>
-        </div>
-    </div>
+    <div class="footer-note">Self-hosted · C++17 · muduo</div>
 </div>
 
+<script src="/assets/app.js"></script>
 <script>
-function showAlert(message){
-    const alertBox = document.getElementById('success-alert');
-    alertBox.textContent = message;
-    alertBox.style.display = 'block';
-    setTimeout(()=>{alertBox.style.display='none';},1000);
+const tabs = document.getElementById('tabs');
+const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
+const hint = document.getElementById('switch-hint');
+
+function showLogin() {
+    tabs.classList.remove('reg');
+    loginForm.style.display = '';
+    registerForm.style.display = 'none';
+    hint.innerHTML = '还没有账号？<a id="switch-to-register">立即注册</a>';
+    bindSwitch();
 }
-function showRegister(){ document.getElementById('login-container').style.display='none'; document.getElementById('register-container').style.display='block'; }
-function showLogin(){ document.getElementById('register-container').style.display='none'; document.getElementById('login-container').style.display='block'; }
+function showRegister() {
+    tabs.classList.add('reg');
+    registerForm.style.display = '';
+    loginForm.style.display = 'none';
+    hint.innerHTML = '已有账号？<a id="switch-to-login">返回登录</a>';
+    bindSwitch();
+}
+function bindSwitch() {
+    const toReg = document.getElementById('switch-to-register');
+    const toLogin = document.getElementById('switch-to-login');
+    if (toReg) toReg.onclick = showRegister;
+    if (toLogin) toLogin.onclick = showLogin;
+}
+document.getElementById('tab-login').onclick = showLogin;
+document.getElementById('tab-register').onclick = showRegister;
+bindSwitch();
+
+function setLoading(btn, on) {
+    btn.classList.toggle('loading', on);
+    btn.disabled = on;
+}
 
 // 登录
-document.getElementById('login-form').addEventListener('submit', function(e){
+loginForm.addEventListener('submit', function (e) {
     e.preventDefault();
-    const username=document.getElementById('login-username').value;
-    const password=document.getElementById('login-password').value;
+    const btn = document.getElementById('login-btn');
+    const username = document.getElementById('login-username').value;
+    const password = document.getElementById('login-password').value;
+    setLoading(btn, true);
 
-    fetch('/login',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({username,password})
-    }).then(response=>{
-        if(response.status===403){ showAlert('账号已在其他地方登录！'); throw new Error('已在其他地方登录'); }
+    fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    }).then(response => {
+        if (response.status === 403) { throw Object.assign(new Error('已在别处登录'), { handled: true }); }
         const contentType = response.headers.get('content-type');
-        if(response.status===200){
-            if(contentType && contentType.includes('application/json')) return response.json();
-            else throw new Error('返回格式错误');
-        }else if(response.status===401){ showAlert('账号或密码错误！'); throw new Error('认证失败'); }
-        else throw new Error('请求失败');
-    }).then(data=>{
-        if(data && data.userId){ sessionStorage.setItem('userId', data.userId); showAlert('登录成功！'); window.location.href='/menu'; }
-        else throw new Error('无效的响应数据');
-    }).catch(error=>{
-        console.error('Error:',error);
-        if(!error.message.includes('已在其他地方登录')&&!error.message.includes('认证失败')) showAlert('操作失败，请重试');
+        if (response.status === 200) {
+            if (contentType && contentType.includes('application/json')) return response.json();
+            throw Object.assign(new Error('返回格式错误'), { handled: true });
+        } else if (response.status === 401) {
+            throw Object.assign(new Error('账号或密码错误'), { handled: true });
+        }
+        throw new Error('请求失败');
+    }).then(data => {
+        if (data && data.userId) {
+            sessionStorage.setItem('userId', data.userId);
+            cppaiToast('登录成功，正在进入…', 'ok');
+            setTimeout(() => { window.location.href = '/menu'; }, 400);
+        } else {
+            throw new Error('无效的响应数据');
+        }
+    }).catch(error => {
+        console.error('Error:', error);
+        setLoading(btn, false);
+        if (error.handled) cppaiToast(error.message, 'err');
+        else cppaiToast('操作失败，请重试', 'err');
     });
 });
 
 // 注册
-document.getElementById('register-form').addEventListener('submit', function(e){
+registerForm.addEventListener('submit', function (e) {
     e.preventDefault();
-    const username=document.getElementById('register-username').value;
-    const password=document.getElementById('register-password').value;
+    const btn = document.getElementById('register-btn');
+    const username = document.getElementById('register-username').value;
+    const password = document.getElementById('register-password').value;
+    setLoading(btn, true);
 
-    fetch('/register',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({username,password})
-    }).then(response=>{
-        if(response.status===200){
-            showAlert('注册成功！');
-            document.getElementById('login-username').value=username;
-            document.getElementById('login-password').value=password;
-            setTimeout(showLogin,1000);
-        }else if(response.status===409){ alert('用户名已被注册，请重新输入！'); }
-    }).catch(error=>console.error('注册错误:',error));
+    fetch('/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    }).then(response => {
+        setLoading(btn, false);
+        if (response.status === 200) {
+            cppaiToast('注册成功，请登录', 'ok');
+            document.getElementById('login-username').value = username;
+            document.getElementById('login-password').value = password;
+            setTimeout(showLogin, 600);
+        } else if (response.status === 409) {
+            cppaiToast('用户名已被注册', 'err');
+        } else {
+            cppaiToast('注册失败，请重试', 'err');
+        }
+    }).catch(error => {
+        console.error('注册错误:', error);
+        setLoading(btn, false);
+        cppaiToast('注册失败，请检查网络', 'err');
+    });
 });
 </script>
 </body>

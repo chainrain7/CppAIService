@@ -1,0 +1,219 @@
+/* ============================================================
+   CppAI 设计系统 —— 全站共享
+   暗色 · 玻璃拟态 · 靛青渐变强调
+   ============================================================ */
+
+:root {
+    --bg: #0b0e14;
+    --bg-soft: #10141d;
+    --panel: rgba(255, 255, 255, 0.04);
+    --panel-hover: rgba(255, 255, 255, 0.07);
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --text: #e8ebf3;
+    --muted: #8b93a7;
+    --muted-2: #5d6479;
+    --acc-1: #6d7cff;
+    --acc-2: #22d3ee;
+    --grad: linear-gradient(135deg, #6d7cff, #22d3ee);
+    --danger: #f87171;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --shadow-1: 0 2px 10px rgba(0, 0, 0, 0.35);
+    --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.5);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    --mono: "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: var(--font);
+    color: var(--text);
+    background:
+        radial-gradient(1100px 500px at 85% -10%, rgba(109, 124, 255, 0.14), transparent 60%),
+        radial-gradient(900px 500px at -10% 110%, rgba(34, 211, 238, 0.10), transparent 60%),
+        var(--bg);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--acc-2); text-decoration: none; }
+
+/* ---------- 品牌标识 ---------- */
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    user-select: none;
+}
+.brand-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--grad);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(109, 124, 255, 0.4);
+    flex: none;
+}
+
+/* ---------- 按钮 ---------- */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--grad);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: filter 0.2s, transform 0.15s, box-shadow 0.2s;
+    box-shadow: 0 4px 16px rgba(109, 124, 255, 0.3);
+}
+.btn:hover { filter: brightness(1.12); box-shadow: 0 6px 22px rgba(109, 124, 255, 0.45); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; filter: none; transform: none; }
+
+.btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+.btn-ghost:hover { background: var(--panel-hover); border-color: var(--border-strong); }
+
+.btn-danger-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    border-radius: var(--radius-sm);
+    background: rgba(248, 113, 113, 0.08);
+    color: var(--danger);
+    font-size: 13px;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-danger-ghost:hover { background: rgba(248, 113, 113, 0.16); }
+
+/* ---------- 表单 ---------- */
+.field { margin-bottom: 16px; }
+.field label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 7px;
+    font-weight: 500;
+}
+.field input, .field select, .field textarea {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+    font-size: 14px;
+    font-family: var(--font);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+.field input::placeholder, .field textarea::placeholder { color: var(--muted-2); }
+.field input:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--acc-1);
+    box-shadow: 0 0 0 3px rgba(109, 124, 255, 0.18);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+/* ---------- Toast 通知 ---------- */
+#toast-root {
+    position: fixed;
+    top: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+.toast {
+    padding: 11px 20px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #fff;
+    background: rgba(22, 26, 36, 0.92);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-2);
+    backdrop-filter: blur(8px);
+    animation: toastIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.toast.ok { border-color: rgba(52, 211, 153, 0.5); }
+.toast.ok::before { content: "✓"; color: var(--ok); font-weight: 700; }
+.toast.err { border-color: rgba(248, 113, 113, 0.5); }
+.toast.err::before { content: "✕"; color: var(--danger); font-weight: 700; }
+.toast.info::before { content: "ⓘ"; color: var(--acc-2); font-weight: 700; }
+.toast.hide { animation: toastOut 0.3s forwards; }
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(-14px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toastOut {
+    to { opacity: 0; transform: translateY(-10px) scale(0.95); }
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.26); }
+
+/* ---------- 动画 ---------- */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- 加载指示 ---------- */
+.spinner {
+    width: 18px;
+    height: 18px;
+    border: 2.5px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+}

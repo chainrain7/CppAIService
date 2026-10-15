@@ -3,67 +3,36 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>404 Not Found</title>
+<title>404 · CppAI</title>
+<link rel="stylesheet" href="/assets/style.css">
 <style>
     body {
-        margin: 0;
-        padding: 0;
-        font-family: "Microsoft YaHei", Arial, sans-serif;
-        background-color: #ffffff;
         display: flex;
-        justify-content: center;
         align-items: center;
-        height: 100vh;
-        color: #333;
+        justify-content: center;
+        min-height: 100vh;
     }
-
-    .container {
-        text-align: center;
-        padding: 30px 40px;
-        background: #f9f9f9;
-        border-radius: 15px;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-    }
-
-    h1 {
-        font-size: 72px;
-        margin: 0;
-        background: linear-gradient(to right, #007bff, #00c6ff);
+    .wrap { text-align: center; animation: fadeUp 0.5s ease; }
+    .code {
+        font-size: 96px;
+        font-weight: 800;
+        line-height: 1;
+        background: linear-gradient(135deg, #6d7cff, #22d3ee);
         -webkit-background-clip: text;
+        background-clip: text;
         -webkit-text-fill-color: transparent;
+        letter-spacing: 4px;
     }
-
-    p {
-        font-size: 20px;
-        margin: 20px 0;
-        color: #555;
-    }
-
-    .btn {
-        display: inline-block;
-        padding: 12px 25px;
-        font-size: 16px;
-        background-color: #007bff;
-        color: white;
-        border: none;
-        border-radius: 10px;
-        cursor: pointer;
-        font-weight: bold;
-        text-decoration: none;
-        transition: all 0.3s;
-    }
-
-    .btn:hover {
-        background-color: #0056b3;
-        transform: scale(1.05);
-    }
+    .wrap h2 { margin: 14px 0 8px; font-size: 18px; font-weight: 600; }
+    .wrap p { margin: 0 0 28px; color: var(--muted); font-size: 14px; }
 </style>
 </head>
 <body>
-    <div class="container">
-        <h1>404</h1>
-        <p>抱歉，您访问的页面不存在！</p>
-        <a href="/menu" class="btn">返回首页</a>
+    <div class="wrap">
+        <div class="code">404</div>
+        <h2>页面不存在</h2>
+        <p>你访问的地址没有对应的服务</p>
+        <a href="/menu" class="btn">返回工作台</a>
     </div>
 </body>
 </html>

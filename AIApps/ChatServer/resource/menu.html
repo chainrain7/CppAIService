@@ -1,238 +1,207 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="zh">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>欢迎来到AI助手界面</title>
-    <style>
-        
-        body {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: "Microsoft YaHei", Arial, sans-serif;
-            color: #fff;
-            overflow: hidden;
-            background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CppAI · 工作台</title>
+<link rel="stylesheet" href="/assets/style.css">
+<style>
+    .shell {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 0 24px 60px;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
 
-        
-        .stars {
-            width: 2px;
-            height: 2px;
-            background: white;
-            border-radius: 50%;
-            position: absolute;
-            animation: twinkling 3s infinite ease-in-out;
-        }
+    /* 顶栏 */
+    .topnav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 0;
+        animation: fadeIn 0.4s ease;
+    }
+    .topnav .brand { font-size: 17px; }
+    .user-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        color: var(--muted);
+    }
+    .user-chip .dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--ok);
+        box-shadow: 0 0 8px var(--ok);
+    }
 
-        @keyframes twinkling {
-            0%, 100% { opacity: 0.2; }
-            50% { opacity: 1; }
-        }
+    /* 主区域 */
+    .hero { margin: 44px 0 36px; animation: fadeUp 0.5s ease; }
+    .hero h1 {
+        margin: 0 0 10px;
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    .hero h1 em {
+        font-style: normal;
+        background: var(--grad);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .hero p { margin: 0; color: var(--muted); font-size: 15px; }
 
-        
-        #loading-container {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            text-align: center;
-        }
+    .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        animation: fadeUp 0.6s ease;
+    }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
 
-        
-        #loading-title {
-            font-size: 2.5em;
-            margin-bottom: 30px;
-            color: #00c3ff;
-            text-shadow: 0 0 10px #00c3ff, 0 0 20px #008bff, 0 0 30px #00e1ff;
-            letter-spacing: 3px;
-            animation: pulse 2s infinite;
-        }
+    .service-card {
+        position: relative;
+        padding: 26px 26px 22px;
+        border-radius: 18px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        transition: transform 0.22s, border-color 0.22s, background 0.22s, box-shadow 0.22s;
+        overflow: hidden;
+    }
+    .service-card:hover {
+        transform: translateY(-3px);
+        border-color: rgba(109, 124, 255, 0.55);
+        background: var(--panel-hover);
+        box-shadow: 0 14px 40px rgba(109, 124, 255, 0.16);
+    }
+    .service-card::after {
+        content: "→";
+        position: absolute;
+        right: 22px; top: 24px;
+        color: var(--muted-2);
+        font-size: 18px;
+        transition: transform 0.22s, color 0.22s;
+    }
+    .service-card:hover::after { transform: translateX(4px); color: var(--acc-2); }
 
-        @keyframes pulse {
-            0%, 100% { text-shadow: 0 0 10px #00c3ff, 0 0 20px #008bff; }
-            50% { text-shadow: 0 0 20px #00e1ff, 0 0 40px #00ffff; }
-        }
+    .svc-icon {
+        width: 46px; height: 46px;
+        border-radius: 13px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 22px;
+        margin-bottom: 16px;
+        color: #fff;
+    }
+    .svc-icon.chat { background: var(--grad); box-shadow: 0 6px 18px rgba(109, 124, 255, 0.35); }
+    .svc-icon.vision { background: linear-gradient(135deg, #22d3ee, #34d399); box-shadow: 0 6px 18px rgba(34, 211, 238, 0.3); }
 
-        
-        .progress-bar {
-            width: 320px;
-            height: 22px;
-            background: #222;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 0 15px #00c3ff;
-        }
+    .service-card h3 { margin: 0 0 8px; font-size: 17px; font-weight: 650; }
+    .service-card p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
 
-        .progress-bar-inner {
-            height: 100%;
-            background: linear-gradient(90deg, #00c3ff, #00e1ff, #00fff7);
-            width: 0;
-            transition: width 0.3s ease;
-        }
+    .svc-tags { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .svc-tags span {
+        font-size: 11.5px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.03);
+    }
 
-        
-        #loading-text {
-            margin-top: 20px;
-            font-size: 1.2em;
-            color: #ccc;
-        }
-
-        
-        #menu-container {
-            display: none;
-            text-align: center;
-            padding: 60px 20px;
-            animation: fadeIn 1s ease forwards;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        h1 {
-            font-size: 2.8em;
-            margin-bottom: 30px;
-            color: #00e1ff;
-            text-shadow: 0 0 15px #00c3ff, 0 0 30px #008bff;
-        }
-
-        .menu-option {
-            margin: 15px 0;
-            font-size: 1.6em;
-            padding: 12px 25px;
-            border-radius: 10px;
-            display: inline-block;
-            background: rgba(0, 195, 255, 0.1);
-            border: 1px solid #00c3ff;
-            color: #fff;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 0 8px #00c3ff;
-        }
-
-        .menu-option:hover {
-            background: rgba(0, 225, 255, 0.2);
-            color: #00ffff;
-            text-shadow: 0 0 10px #00e1ff;
-            transform: scale(1.05);
-            box-shadow: 0 0 15px #00e1ff;
-        }
-
-        .menu-border {
-            margin: 20px auto;
-            width: 85%;
-            height: 2px;
-            background: #00c3ff;
-            box-shadow: 0 0 10px #00c3ff;
-        }
-    </style>
+    .foot {
+        margin-top: auto;
+        padding-top: 50px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--muted-2);
+        font-size: 12.5px;
+        animation: fadeIn 0.8s ease;
+    }
+</style>
 </head>
-
 <body>
-    
-    <script>
-        for (let i = 0; i < 80; i++) {
-            let star = document.createElement("div");
-            star.className = "stars";
-            star.style.top = Math.random() * window.innerHeight + "px";
-            star.style.left = Math.random() * window.innerWidth + "px";
-            star.style.animationDuration = 2 + Math.random() * 3 + "s";
-            document.body.appendChild(star);
-        }
-    </script>
+<div class="shell">
+    <nav class="topnav">
+        <span class="brand"><span class="brand-mark">◈</span>CppAI</span>
+        <span class="user-chip">
+            <span class="dot"></span>在线
+            <button class="btn-danger-ghost" id="logout-btn">退出登录</button>
+        </span>
+    </nav>
 
-    
-    <div id="loading-container">
-        <div id="loading-title">AI 助手 启动中...</div>
-        <div class="progress-bar">
-            <div class="progress-bar-inner"></div>
+    <div class="hero">
+        <h1>欢迎回来，<em>开始与 AI 对话</em></h1>
+        <p>多模型对话 · 知识库问答 · 工具调用 · 语音合成，全部跑在你自己的 C++ 服务上。</p>
+    </div>
+
+    <div class="grid">
+        <div class="service-card" id="chat-service">
+            <div class="svc-icon chat">✦</div>
+            <h3>AI 聊天助手</h3>
+            <p>与通义千问 / DeepSeek 对话，支持 RAG 知识库问答与 MCP 工具调用，多会话管理与语音合成。</p>
+            <div class="svc-tags"><span>多模型</span><span>RAG</span><span>MCP 工具</span><span>TTS</span></div>
         </div>
-        <div id="loading-text">系统正在初始化，请稍候...</div>
+        <div class="service-card" id="image-service">
+            <div class="svc-icon vision">◎</div>
+            <h3>图像识别</h3>
+            <p>上传图片，ONNX Runtime 本地推理完成分类识别，不依赖云端视觉 API。</p>
+            <div class="svc-tags"><span>ONNX</span><span>本地推理</span><span>OpenCV</span></div>
+        </div>
     </div>
 
-    
-    <div id="menu-container">
-        <h1>✨ 欢迎来到 AI 助手 ✨</h1>
-        <div class="menu-border"></div>
-        <div class="menu-option" id="chat-service">[1] 进入 AI 聊天助手</div>
-        <div class="menu-option" id="image-service">[2] 进入 AI 图像识别助手</div>
-        <div class="menu-option" id="logout">[0] 退出登录</div>
+    <div class="foot">
+        <span>CppAI Service · C++17 · muduo</span>
+        <span>GPL-3.0</span>
     </div>
+</div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const progressBar = document.querySelector('.progress-bar-inner');
-            const loadingContainer = document.getElementById('loading-container');
-            const menuContainer = document.getElementById('menu-container');
+<script src="/assets/app.js"></script>
+<script>
+    // 站内导航标志：beforeunload 里据此跳过自动登出（否则点卡片进服务
+    // 就会被当作"页面关闭"登出会话，下一个页面立刻 401）
+    let internalNav = false;
 
-            
-            let percent = 0;
-            let interval = setInterval(() => {
-                percent += 10;
-                progressBar.style.width = percent + "%";
-                if (percent >= 100) {
-                    clearInterval(interval);
-                    setTimeout(() => {
-                        loadingContainer.style.display = 'none';
-                        menuContainer.style.display = 'block';
-                    }, 300);
-                }
-            }, 200);
-        });
+    // 进入服务（标准导航，浏览器历史/回退自然）
+    function loadService(path) {
+        internalNav = true;
+        window.location.href = path;
+    }
 
-        // 进入AI服务
-        function loadService(path, errorMsg) {
-            fetch(path, { method: 'GET', headers: { 'Accept': 'text/html' } })
-                .then(res => res.text())
-                .then(html => { document.open(); document.write(html); document.close(); })
-                .catch(() => alert(errorMsg));
+    document.getElementById('chat-service').addEventListener('click', () => loadService('/chat'));
+    document.getElementById('image-service').addEventListener('click', () => loadService('/upload'));
+
+    document.getElementById('logout-btn').addEventListener('click', () => {
+        const userId = sessionStorage.getItem('userId');
+        fetch('/user/logout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: userId, type: 'manual', gameType: 0 })
+        })
+            .then(() => { sessionStorage.clear(); window.location.href = '/entry'; })
+            .catch(() => cppaiToast('退出登录失败', 'err'));
+    });
+
+    // 仅在真正的刷新/关闭时自动登出（sendBeacon 不阻塞卸载）；站内导航跳过
+    window.addEventListener('beforeunload', function () {
+        if (internalNav) return;
+        const userId = sessionStorage.getItem('userId');
+        if (userId) {
+            const data = new Blob([JSON.stringify({ userId: userId, type: 'refresh', gameType: 0 })],
+                { type: 'application/json' });
+            navigator.sendBeacon('/user/logout', data);
         }
+    });
 
-        document.getElementById('chat-service').addEventListener('click', () => loadService('/chat', '进入AI聊天服务异常！'));
-        document.getElementById('image-service').addEventListener('click', () => loadService('/upload', '进入AI图像识别服务异常！'));
-        document.getElementById('logout').addEventListener('click', () => {
-            const userId = sessionStorage.getItem('userId');
-            fetch('/user/logout', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: userId, type: 'manual', gameType: 0 })
-            })
-                .then(res => {
-                    if (!res.ok) throw new Error('Logout failed');
-                    return fetch('/', { method: 'GET', headers: { 'Accept': 'text/html' } });
-                })
-                .then(res => res.text())
-                .then(html => {
-                    sessionStorage.clear();
-                    document.open();
-                    document.write(html);
-                    document.close();
-                })
-                .catch(() => alert('退出登录失败！'));
-        });
-
-        // 页面刷新/关闭时自动登出
-        window.addEventListener('beforeunload', function () {
-            const userId = sessionStorage.getItem('userId');
-            if (userId) {
-                const data = new Blob([JSON.stringify({ userId: userId, type: 'refresh', gameType: 0 })],
-                    { type: 'application/json' });
-                navigator.sendBeacon('/user/logout', data);
-            }
-        });
-
-        // 页面加载时用户检查
-        window.addEventListener('load', function () {
-            const userId = sessionStorage.getItem('userId');
-            if (!userId) {
-                window.location.href = '/entry';
-            }
-        });
-    </script>
+    // 未登录跳转
+    window.addEventListener('load', function () {
+        const userId = sessionStorage.getItem('userId');
+        if (!userId) window.location.href = '/entry';
+    });
+</script>
 </body>
 </html>
