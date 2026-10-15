@@ -2,6 +2,8 @@
 #include "../include/handlers/ChatRegisterHandler.h"
 #include "../include/handlers/ChatLogoutHandler.h"
 #include"../include/handlers/ChatHandler.h"
+#include "../include/handlers/StaticAssetHandler.h"
+#include "../include/handlers/NotFoundPageHandler.h"
 #include"../include/handlers/ChatEntryHandler.h"
 #include"../include/handlers/ChatSendHandler.h"
 #include"../include/handlers/AIMenuHandler.h"
@@ -142,6 +144,14 @@ void ChatServer::initializeRouter() {
     httpServer_.Get("/chat/sessions", std::make_shared<ChatSessionsHandler>(this));
 
     httpServer_.Post("/chat/tts", std::make_shared<ChatSpeechHandler>(this));
+
+    // 静态资源（css/js 及 vendor 子目录），动态路由 /assets/(.+)
+    httpServer_.addRoute(http::HttpRequest::kGet, "/assets/(.+)",
+        std::make_shared<StaticAssetHandler>());
+
+    // GET 兜底：未匹配的路径返回 404 页面（正则路由最后检查，不影响上面的精确路由）
+    httpServer_.addRoute(http::HttpRequest::kGet, "/(.*)",
+        std::make_shared<NotFoundPageHandler>());
 }
 
 void ChatServer::initializeSession() {
