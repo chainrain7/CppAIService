@@ -2,11 +2,19 @@
 
 // #include"AISpeechProcessor.h"
 
- 
+#include <stdexcept>
+
 static size_t onWriteData(void* buffer, size_t size, size_t nmemb, void* userp) {
     std::string* str = static_cast<std::string*>(userp);
     str->append((char*)buffer, size * nmemb);
     return size * nmemb;
+}
+
+// 统一的 curl 超时/线程安全设置（跑在业务线程池里，NOSIGNAL 必需）
+static void applySafetyOpts(CURL* curl, long timeoutSeconds) {
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
 }
 
 std::string AISpeechProcessor::getAccessToken() {
@@ -18,6 +26,7 @@ std::string AISpeechProcessor::getAccessToken() {
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_DEFAULT_PROTOCOL, "https");
+    applySafetyOpts(curl, 10L);
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
@@ -62,6 +71,7 @@ std::string AISpeechProcessor::recognize(const std::string& speechData,
     curl_easy_setopt(curl, CURLOPT_URL, "https://vop.baidu.com/server_api");
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_DEFAULT_PROTOCOL, "undefined");
+    applySafetyOpts(curl, 30L);
 
     struct curl_slist* headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -122,9 +132,14 @@ std::string AISpeechProcessor::synthesize(const std::string& text,
     CURLcode res;
     std::string response;
 
+    // token 获取失败就立即报错，不能带着空 token 去创建任务再吞掉错误
+    if (token_.empty()) {
+        throw std::runtime_error("百度 access token 获取失败（检查 BAIDU_CLIENT_ID / BAIDU_CLIENT_SECRET）");
+    }
+
     // ----------- 第一步：创建合成任务 -----------
     curl = curl_easy_init();
-    if (!curl) return "";
+    if (!curl) throw std::runtime_error("curl init failed");
 
     std::string create_url = "https://aip.baidubce.com/rpc/2.0/tts/v1/create?access_token=" + token_;
 
@@ -133,6 +148,7 @@ std::string AISpeechProcessor::synthesize(const std::string& text,
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     // 按你示例使用 undefined（和官方 demo 一致）
     curl_easy_setopt(curl, CURLOPT_DEFAULT_PROTOCOL, "undefined");
+    applySafetyOpts(curl, 15L);
 
     struct curl_slist* headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -160,7 +176,7 @@ std::string AISpeechProcessor::synthesize(const std::string& text,
     if (res != CURLE_OK) {
         curl_easy_cleanup(curl);
         if (headers) curl_slist_free_all(headers);
-        return "";
+        throw std::runtime_error("百度 TTS 创建任务请求失败: " + std::string(curl_easy_strerror(res)));
     }
 
     curl_easy_cleanup(curl);
@@ -177,11 +193,22 @@ std::string AISpeechProcessor::synthesize(const std::string& text,
                    && !result_json["tasks_info"].empty() && result_json["tasks_info"][0].contains("task_id")) {
             task_id = result_json["tasks_info"][0]["task_id"].get<std::string>();
         }
-    } catch (...) {
-        return "";
+        // 创建失败：把百度返回的错误码/描述透传出来，而不是静默返回空
+        if (task_id.empty()) {
+            std::string errDetail = response.substr(0, 200);
+            if (result_json.contains("error_description") && result_json["error_description"].is_string()) {
+                errDetail = result_json["error_description"].get<std::string>();
+            } else if (result_json.contains("error_msg") && result_json["error_msg"].is_string()) {
+                errDetail = result_json["error_msg"].get<std::string>();
+            }
+            throw std::runtime_error("百度 TTS 创建任务失败: " + errDetail);
+        }
+    } catch (const std::runtime_error&) {
+        throw;
     }
-
-    if (task_id.empty()) return "";
+    catch (...) {
+        throw std::runtime_error("百度 TTS 创建任务响应解析失败: " + response.substr(0, 200));
+    }
 
     // ----------- 第二步：轮询查询任务状态 -----------
     std::string speech_url;
@@ -202,6 +229,7 @@ std::string AISpeechProcessor::synthesize(const std::string& text,
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_DEFAULT_PROTOCOL, "undefined");
+        applySafetyOpts(curl, 10L);
 
         headers = NULL;
         headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -238,5 +266,9 @@ std::string AISpeechProcessor::synthesize(const std::string& text,
         }
     }
 
+    // 轮询结束仍拿不到 URL：任务超时或异常状态，显式报错
+    if (speech_url.empty()) {
+        throw std::runtime_error("百度 TTS 任务超时（" + std::to_string(max_loops) + " 秒内未生成音频）");
+    }
     return speech_url;
 }

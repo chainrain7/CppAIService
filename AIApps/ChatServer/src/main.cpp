@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
 	LOG_INFO << "pid = " << getpid();
 	std::string serverName = "ChatServer";
 	int port = 80;
-    // 
+    //
     int opt;
     const char* str = "p:";
     while ((opt = getopt(argc, argv, str)) != -1)
@@ -48,16 +48,26 @@ int main(int argc, char* argv[]) {
     // 业务线程池：承接 LLM 调用等秒级阻塞 IO，避免占用 muduo IO 线程
     BizThreadPool::instance().start(8);
 
-    ChatServer server(port, serverName);
-    server.setThreadNum(4);
-    
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-    
-    server.initChatMessage();    
+    // 基础设施（MySQL/RabbitMQ）不可用时优雅退出并给出明确原因，
+    // 而不是未捕获异常直接 core dump
+    try {
+        ChatServer server(port, serverName);
+        server.setThreadNum(4);
+
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        server.initChatMessage();
 
 
-    RabbitMQThreadPool pool(RABBITMQ_HOST, QUEUE_NAME, THREAD_NUM, executeMysql);
-    pool.start();
+        RabbitMQThreadPool pool(RABBITMQ_HOST, QUEUE_NAME, THREAD_NUM, executeMysql);
+        pool.start();
 
-    server.start();
+        server.start();
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[startup] 初始化失败，服务退出: " << e.what() << std::endl;
+        std::cerr << "[startup] 请确认 MySQL(3306) / RabbitMQ(5672) 已启动（deploy/docker-compose.yml）" << std::endl;
+        return 1;
+    }
+    return 0;
 }
