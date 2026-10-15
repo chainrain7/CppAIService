@@ -55,7 +55,7 @@ void ChatServer::readDataFromMySQL() {
 
     std::string sql = "SELECT id, username,session_id, is_user, content, ts FROM chat_message ORDER BY ts ASC, id ASC";
 
-    sql::ResultSet* res;
+    std::shared_ptr<sql::ResultSet> res;
     try {
         res = mysqlUtil_.executeQuery(sql);
     }
