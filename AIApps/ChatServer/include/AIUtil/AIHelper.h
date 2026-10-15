@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <mutex>
 #include <curl/curl.h>
 #include <iostream>
 #include <sstream>
@@ -41,6 +42,8 @@ public:
 
 private:
     std::string escapeString(const std::string& input);
+    // chat 的实际实现（调用方已持有 sessionMutex_）
+    std::string chatInternal(int userId, std::string userName, std::string sessionId, std::string userQuestion, std::string modelType);
     //加入到mysql的接口（提供加入到线程池的接口，线程池做异步mysql更新操作）
     //todo: 
     void pushMessageToMysql(int userId, const std::string& userName, bool is_user, const std::string& userInput, long long ms,std::string sessionId);
@@ -66,6 +69,13 @@ private:
     //偶数下标代表用户的信息，奇数下标是ai返回的内容
     //后者代表时间戳
     std::vector<std::pair<std::string, long long>> messages;
+
+    // 会话级串行锁：LLM 调用挪进业务线程池后，同一会话的并发请求
+    // （如双击发送）会交错污染上下文——同会话排队执行、不同会话并行。
+    // 锁序：sessionMutex_ -> messagesMutex_，反向获取不存在
+    std::mutex sessionMutex_;
+    // 保护 messages 向量的细粒度锁：chat() 内部与历史读取并发访问
+    std::mutex messagesMutex_;
 
     //http::MysqlUtil mysqlUtil_;
 };

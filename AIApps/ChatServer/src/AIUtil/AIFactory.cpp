@@ -17,3 +17,7 @@ std::shared_ptr<AIStrategy> StrategyFactory::create(const std::string& name) {
     }
     return it->second();
 }
+
+bool StrategyFactory::has(const std::string& name) {
+    return creators.find(name) != creators.end();
+}

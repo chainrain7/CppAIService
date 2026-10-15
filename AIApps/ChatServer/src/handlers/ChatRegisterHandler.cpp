@@ -1,10 +1,43 @@
 #include "../include/handlers/ChatRegisterHandler.h"
+#include "../include/AuthUtil.h"
 
 
 void ChatRegisterHandler::handle(const http::HttpRequest& req, http::HttpResponse* resp)
 {
-    
-    json parsed = json::parse(req.getBody());
+    // 请求体解析失败统一返回 400，不把解析库内部细节回给客户端
+    json parsed;
+    try
+    {
+        parsed = json::parse(req.getBody());
+    }
+    catch (const std::exception&)
+    {
+        json failureResp;
+        failureResp["status"] = "error";
+        failureResp["message"] = "invalid request body";
+        std::string failureBody = failureResp.dump(4);
+        resp->setStatusLine(req.getVersion(), http::HttpResponse::k400BadRequest, "Bad Request");
+        resp->setCloseConnection(true);
+        resp->setContentType("application/json");
+        resp->setContentLength(failureBody.size());
+        resp->setBody(failureBody);
+        return;
+    }
+
+    if (!parsed.contains("username") || !parsed.contains("password"))
+    {
+        json failureResp;
+        failureResp["status"] = "error";
+        failureResp["message"] = "username and password are required";
+        std::string failureBody = failureResp.dump(4);
+        resp->setStatusLine(req.getVersion(), http::HttpResponse::k400BadRequest, "Bad Request");
+        resp->setCloseConnection(true);
+        resp->setContentType("application/json");
+        resp->setContentLength(failureBody.size());
+        resp->setBody(failureBody);
+        return;
+    }
+
     std::string username = parsed["username"];
     std::string password = parsed["password"];
 
@@ -46,11 +79,13 @@ int ChatRegisterHandler::insertUser(const std::string& username, const std::stri
 
     if (!isUserExist(username))
     {
-
-        std::string sql = "INSERT INTO users (username, password) VALUES ('" + username + "', '" + password + "')";
-        mysqlUtil_.executeUpdate(sql);
-        std::string sql2 = "SELECT id FROM users WHERE username = '" + username + "'";
-        auto res = mysqlUtil_.executeQuery(sql2);
+        // 预处理语句传参（? 占位），杜绝 SQL 注入；密码只存哈希
+        std::string hashed = hashPassword(username, password);
+        mysqlUtil_.executeUpdate(
+            "INSERT INTO users (username, password) VALUES (?, ?)",
+            username, hashed);
+        auto res = mysqlUtil_.executeQuery(
+            "SELECT id FROM users WHERE username = ?", username);
         if (res->next())
         {
             return res->getInt("id");
@@ -61,8 +96,8 @@ int ChatRegisterHandler::insertUser(const std::string& username, const std::stri
 
 bool ChatRegisterHandler::isUserExist(const std::string& username)
 {
-    std::string sql = "SELECT id FROM users WHERE username = '" + username + "'";
-    auto res = mysqlUtil_.executeQuery(sql);
+    auto res = mysqlUtil_.executeQuery(
+        "SELECT id FROM users WHERE username = ?", username);
     if (res->next())
     {
         return true;

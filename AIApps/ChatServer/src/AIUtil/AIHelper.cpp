@@ -24,18 +24,35 @@ void AIHelper::addMessage(int userId,const std::string& userName, bool is_user,c
     auto now = std::chrono::system_clock::now();
     auto duration = now.time_since_epoch();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-    messages.push_back({ userInput,ms });
-    //消息队列异步入库
+    {
+        std::lock_guard<std::mutex> lock(messagesMutex_);
+        messages.push_back({ userInput,ms });
+    }
+    //消息队列异步入库（MQ 发布不在消息锁内，避免持锁做网络 IO）
     pushMessageToMysql(userId, userName, is_user, userInput, ms, sessionId);
 }
 
 void AIHelper::restoreMessage(const std::string& userInput,long long ms) {
+    std::lock_guard<std::mutex> lock(messagesMutex_);
     messages.push_back({ userInput,ms });
 }
 
 
-// 发送聊天消息
-std::string AIHelper::chat(int userId,std::string userName, std::string sessionId, std::string userQuestion, std::string modelType) {
+// 发送聊天消息（对外的串行入口：同会话排队，不同会话并行）
+std::string AIHelper::chat(int userId, std::string userName, std::string sessionId, std::string userQuestion, std::string modelType) {
+    std::lock_guard<std::mutex> sessionLock(sessionMutex_);
+    try {
+        return chatInternal(userId, userName, sessionId, userQuestion, modelType);
+    }
+    catch (const std::exception& e) {
+        // LLM 调用失败也补一条 AI 侧记录，避免历史里出现没有回答的孤儿消息。
+        // 必须在会话锁内执行，否则会与排队的下一个 chat 竞争 messages 向量
+        addMessage(userId, userName, false, "[Error] " + std::string(e.what()), sessionId);
+        throw;
+    }
+}
+
+std::string AIHelper::chatInternal(int userId,std::string userName, std::string sessionId, std::string userQuestion, std::string modelType) {
 
     //设置策略
     setStrategy(StrategyFactory::instance().create(modelType));
@@ -57,13 +74,19 @@ std::string AIHelper::chat(int userId,std::string userName, std::string sessionI
     config.loadFromFile("../AIApps/ChatServer/resource/config.json");
     std::string tempUserQuestion =config.buildPrompt(userQuestion);
     std::cout << "tempUserQuestion is " << tempUserQuestion << std::endl;
-    messages.push_back({ tempUserQuestion, 0 });
+    {
+        std::lock_guard<std::mutex> lock(messagesMutex_);
+        messages.push_back({ tempUserQuestion, 0 });
+    }
 
     json firstReq = strategy->buildRequest(this->messages);
     json firstResp = executeCurl(firstReq);
     std::string aiResult = strategy->parseResponse(firstResp);
     // 用完立即移除提示词
-    messages.pop_back();
+    {
+        std::lock_guard<std::mutex> lock(messagesMutex_);
+        messages.pop_back();
+    }
 
     std::cout << "aiResult is " << aiResult << std::endl;
     // 解析AI响应（是否工具调用）
@@ -101,13 +124,19 @@ std::string AIHelper::chat(int userId,std::string userName, std::string sessionI
     std::string secondPrompt = config.buildToolResultPrompt(userQuestion, call.toolName, call.args, toolResult);
     
     std::cout << "secondPrompt is " << secondPrompt << std::endl;
-    messages.push_back({ secondPrompt, 0 });
+    {
+        std::lock_guard<std::mutex> lock(messagesMutex_);
+        messages.push_back({ secondPrompt, 0 });
+    }
 
     json secondReq = strategy->buildRequest(messages);
     json secondResp = executeCurl(secondReq);
     std::string finalAnswer = strategy->parseResponse(secondResp);
     //删除包含提示词的信息
-    messages.pop_back();
+    {
+        std::lock_guard<std::mutex> lock(messagesMutex_);
+        messages.pop_back();
+    }
 
     std::cout << "finalAnswer is " << finalAnswer << std::endl;
 
@@ -123,6 +152,7 @@ json AIHelper::request(const json& payload) {
 }
 
 std::vector<std::pair<std::string, long long>> AIHelper::GetMessages() {
+    std::lock_guard<std::mutex> lock(messagesMutex_);
     return this->messages;
 }
 
@@ -133,8 +163,6 @@ json AIHelper::executeCurl(const json& payload) {
     if (!curl) {
         throw std::runtime_error("Failed to initialize curl");
     }
-
-    std::cout<<"test "<< strategy->getApiUrl().c_str()<<' '<< strategy->getApiKey()<<std::endl;
 
     std::string readBuffer;
     struct curl_slist* headers = nullptr;

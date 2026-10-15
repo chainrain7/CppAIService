@@ -28,8 +28,24 @@ void ChatHistoryHandler::handle(const http::HttpRequest& req, http::HttpResponse
         std::string sessionId;
         auto body = req.getBody();
         if (!body.empty()) {
-            auto j = json::parse(body);
-            if (j.contains("sessionId")) sessionId = j["sessionId"];
+            try
+            {
+                auto j = json::parse(body);
+                if (j.contains("sessionId")) sessionId = j["sessionId"];
+            }
+            catch (const std::exception&)
+            {
+                json failureResp;
+                failureResp["status"] = "error";
+                failureResp["message"] = "invalid request body";
+                std::string failureBody = failureResp.dump(4);
+                resp->setStatusLine(req.getVersion(), http::HttpResponse::k400BadRequest, "Bad Request");
+                resp->setCloseConnection(true);
+                resp->setContentType("application/json");
+                resp->setContentLength(failureBody.size());
+                resp->setBody(failureBody);
+                return;
+            }
         }
 
         std::vector<std::pair<std::string, long long>> messages;
@@ -40,15 +56,15 @@ void ChatHistoryHandler::handle(const http::HttpRequest& req, http::HttpResponse
 
             auto& userSessions = server_->chatInformation[userId];
 
-            if (userSessions.find(sessionId) == userSessions.end()) {
-
-                userSessions.emplace( 
-                    sessionId,
-                    std::make_shared<AIHelper>()
-                );
+            // 未知会话直接返回空历史，不再静默创建
+            // （否则会产生"存在于内存但不在会话列表"的僵尸会话）
+            auto itSession = userSessions.find(sessionId);
+            if (itSession != userSessions.end()) {
+                AIHelperPtr = itSession->second;
             }
-            AIHelperPtr= userSessions[sessionId];
-            messages= AIHelperPtr->GetMessages();
+            if (AIHelperPtr) {
+                messages = AIHelperPtr->GetMessages();
+            }
         }
 
 

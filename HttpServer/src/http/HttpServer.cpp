@@ -1,6 +1,7 @@
 #include "../../include/http/HttpServer.h"
 
 #include <any>
+#include <cstring>
 #include <functional>
 #include <memory>
 
@@ -10,8 +11,7 @@ namespace http
 // 默认http回应函数
 void defaultHttpCallback(const HttpRequest &, HttpResponse *resp)
 {
-    resp->setStatusCode(HttpResponse::k404NotFound);
-    resp->setStatusMessage("Not Found");
+    resp->setStatusLine("HTTP/1.1", HttpResponse::k404NotFound, "Not Found");
     resp->setCloseConnection(true);
 }
 
@@ -126,11 +126,19 @@ void HttpServer::onMessage(const muduo::net::TcpConnectionPtr &conn,
             conn->send("HTTP/1.1 400 Bad Request\r\n\r\n");
             conn->shutdown();
         }
-        // 如果buf缓冲区中解析出一个完整的数据包才封装响应报文
-        if (context->gotAll())
+        else
         {
-            onRequest(conn, context->request());
-            context->reset();
+            // 循环处理粘包：同一批数据里可能挤着多个完整请求（HTTP pipelining），
+            // 只处理一个会导致后续请求滞留缓冲区，直到下一次数据到达才被解析
+            while (context->gotAll())
+            {
+                onRequest(conn, context->request());
+                context->reset();
+                if (buf->readableBytes() == 0 || !context->parseRequest(buf, receiveTime))
+                {
+                    break;
+                }
+            }
         }
     }
     catch (const std::exception &e)
@@ -190,24 +198,27 @@ void HttpServer::handleRequest(const HttpRequest &req, HttpResponse *resp)
         {
             LOG_INFO << "请求的啥，url：" << req.method() << " " << req.path();
             LOG_INFO << "未找到路由，返回404";
-            resp->setStatusCode(HttpResponse::k404NotFound);
-            resp->setStatusMessage("Not Found");
+            // 必须补全状态行（含协议版本），否则发出的是非法 HTTP 报文
+            resp->setStatusLine(req.getVersion(), HttpResponse::k404NotFound, "Not Found");
             resp->setCloseConnection(true);
         }
 
         // 处理响应后的中间件
         middlewareChain_.processAfter(*resp);
     }
-    catch (const HttpResponse& res) 
+    catch (const HttpResponse& res)
     {
         // 处理中间件抛出的响应（如CORS预检请求）
         *resp = res;
     }
-    catch (const std::exception& e) 
+    catch (const std::exception& e)
     {
-        // 错误处理
-        resp->setStatusCode(HttpResponse::k500InternalServerError);
+        // 错误处理（同样要补全状态行）
+        resp->setStatusLine(req.getVersion(), HttpResponse::k500InternalServerError, "Internal Server Error");
+        resp->setContentType("text/plain");
+        resp->setContentLength(strlen(e.what()));
         resp->setBody(e.what());
+        resp->setCloseConnection(true);
     }
 }
 
