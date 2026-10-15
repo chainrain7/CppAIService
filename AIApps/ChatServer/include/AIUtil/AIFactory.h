@@ -23,6 +23,9 @@ public:
 
     std::shared_ptr<AIStrategy> create(const std::string& name);
 
+    // 校验 modelType 是否已注册（Handler 投递任务前的快速参数校验）
+    bool has(const std::string& name);
+
 private:
     StrategyFactory() = default;
     std::unordered_map<std::string, Creator> creators;

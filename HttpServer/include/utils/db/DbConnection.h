@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <mutex>
+#include <type_traits>
 #include <cppconn/connection.h>
 #include <cppconn/prepared_statement.h>
 #include <cppconn/resultset.h>
@@ -76,22 +77,31 @@ public:
 private:
      // 辅助函数：递归终止条件
     void bindParams(sql::PreparedStatement*, int) {}
-    
+
+    // 单个参数绑定：按实参类型分发。
+    // 旧实现对 string 统一走 std::to_string（编译错误）或依赖一个
+    // 永远不会被选中的 const string& 重载——此处用 if constexpr 彻底修正
+    template<typename T>
+    void bindOne(sql::PreparedStatement* stmt, int index, T&& value)
+    {
+        using U = std::remove_cv_t<std::remove_reference_t<T>>;
+        if constexpr (std::is_same_v<U, std::string>) {
+            stmt->setString(index, std::forward<T>(value));
+        }
+        else if constexpr (std::is_integral_v<U>) {
+            stmt->setInt(index, static_cast<int>(std::forward<T>(value)));
+        }
+        else {
+            stmt->setString(index, std::to_string(std::forward<T>(value)));
+        }
+    }
+
     // 辅助函数：绑定参数
     template<typename T, typename... Args>
-    void bindParams(sql::PreparedStatement* stmt, int index, 
-                   T&& value, Args&&... args) 
+    void bindParams(sql::PreparedStatement* stmt, int index,
+                   T&& value, Args&&... args)
     {
-        stmt->setString(index, std::to_string(std::forward<T>(value)));
-        bindParams(stmt, index + 1, std::forward<Args>(args)...);
-    }
-    
-    // 特化 string 类型的参数绑定
-    template<typename... Args>
-    void bindParams(sql::PreparedStatement* stmt, int index, 
-                   const std::string& value, Args&&... args) 
-    {
-        stmt->setString(index, value);
+        bindOne(stmt, index, std::forward<T>(value));
         bindParams(stmt, index + 1, std::forward<Args>(args)...);
     }
 

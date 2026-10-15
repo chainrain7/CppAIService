@@ -1,6 +1,22 @@
 #include "../include/handlers/ChatCreateAndSendHandler.h"
 #include "../include/AIUtil/BizThreadPool.h"
 
+// 统一的参数校验失败响应（400，不泄漏内部细节）
+static bool rejectBadChatRequest(http::HttpResponse* resp, const std::string& version,
+                                 const std::string& message)
+{
+    json failureResp;
+    failureResp["status"] = "error";
+    failureResp["message"] = message;
+    std::string failureBody = failureResp.dump(4);
+    resp->setStatusLine(version, http::HttpResponse::k400BadRequest, "Bad Request");
+    resp->setCloseConnection(true);
+    resp->setContentType("application/json");
+    resp->setContentLength(failureBody.size());
+    resp->setBody(failureBody);
+    return true;
+}
+
 
 void ChatCreateAndSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* resp)
 {
@@ -27,16 +43,37 @@ void ChatCreateAndSendHandler::handle(const http::HttpRequest& req, http::HttpRe
         int userId = std::stoi(session->getValue("userId"));
         std::string username = session->getValue("username");
 
+        // —— 参数校验：空 body / 坏 JSON / 缺字段 / 非法 modelType 一律 400 ——
         std::string userQuestion;
-        std::string modelType;
+        std::string modelType = "1";
 
         auto body = req.getBody();
-        if (!body.empty()) {
-            auto j = json::parse(body);
-            if (j.contains("question")) userQuestion = j["question"];
-
-
-            modelType = j.contains("modelType") ? j["modelType"].get<std::string>() : "1";
+        if (body.empty())
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "request body is required");
+            return;
+        }
+        json j;
+        try
+        {
+            j = json::parse(body);
+        }
+        catch (const std::exception&)
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "invalid request body");
+            return;
+        }
+        if (!j.contains("question"))
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "question is required");
+            return;
+        }
+        userQuestion = j["question"];
+        if (j.contains("modelType")) modelType = j["modelType"].get<std::string>();
+        if (!StrategyFactory::instance().has(modelType))
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "invalid modelType");
+            return;
         }
 
         AISessionIdGenerator generator;

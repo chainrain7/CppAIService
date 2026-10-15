@@ -13,8 +13,10 @@ C++ 没有 LangChain、Spring AI 那样现成的 AI 应用生态，HTTP 封装�
 | 注册式工厂 | `AIApps/ChatServer/include/AIUtil/AIFactory.h` | `StrategyRegister<T>` 静态自注册，新增一个模型只加一个 cpp，不改工厂代码 |
 | 轻量级 MCP | `AIConfig.*` + `AIToolRegistry.*` | 工具清单配置化 + Prompt 协议化，「模型判断 → 调工具 → 二次回答」两段式推理，对齐 Model Context Protocol 核心理念 |
 | 多会话管理 | `AIApps/ChatServer/include/ChatServer.h` | `unordered_map<userId, map<sessionId, AIHelper>>` 两级隔离，单用户多会话互不串上下文 |
-| 异步入库 | `AIApps/ChatServer/*/**/MQManager.*` | RabbitMQ 承载持久化写库：前台同步写内存、异步入库，消费线程池执行 SQL，主链路零阻塞 |
+| 异步入库 | `AIApps/ChatServer/*/**/MQManager.*` | RabbitMQ 承载持久化写库：前台同步写内存、异步入库，消费线程池执行 SQL，主链路零阻塞；消费线程断线自动重连 |
 | LLM 调用异步化 | `AIApps/ChatServer/include/AIUtil/BizThreadPool.h` | 手写业务线程池（任务队列 + 条件变量）：秒级大模型调用移出 muduo IO 线程，工作线程完成后经 `TcpConnection` 直接回包；curl 带连接 / 总超时 |
+| 会话级并发控制 | `AIHelper` 内置双粒度锁 | 同会话请求排队执行（问答保序、上下文不被并发污染），不同会话并行 |
+| 安全加固 | 注册/登录 + 参数校验 | 注册走预处理语句（杜绝 SQL 注入），密码 SHA256(用户名做盐) 哈希入库，请求参数前置校验统一 400 |
 | 语音链路 | `AIApps/ChatServer/*/**/AISpeechProcessor.*` | 百度 TTS（建任务 → 轮询 → 取音频 URL）+ ASR 接口封装 |
 | 图像识别 | `AIApps/ChatServer/*/**/ImageRecognizer.*` | ONNX Runtime + OpenCV 预处理，本地推理，不依赖云端视觉 API |
 | 容器化交付 | `deploy/docker-compose.yml` | MySQL 8 + RabbitMQ 一键拉起，首次启动自动建库建表 |
@@ -185,18 +187,25 @@ Handler 不直接写库，而是把拼好的 INSERT 发布到 `sql_queue`；`mai
 
 ## 配置说明
 
-- **模型密钥**全部走环境变量（见快速开始第 3 步），代码仓库不含任何密钥。
+- **模型密钥**全部走环境变量（见快速开始第 3 步），代码仓库不含任何密钥，也不会打印到日志。
+- **密码存储**：`SHA256(username::password)`（用户名做盐）哈希后入库，库中不落明文。
 - **`AIApps/ChatServer/resource/config.json`**：工具清单（`tools`）与两段式推理的 Prompt 模板（`prompt_template`）。
 - **数据库连接**目前写死在 `ChatServer.cpp`（`root/123456@127.0.0.1:3306/ChatHttpServer`），与 `docker-compose.yml` 保持一致；改密码需两处同步（已列入改进项）。
 
 ## 已知问题与改进计划
 
-当前已知两处框架层问题（均已定位、有明确修法）：
+以下问题在深度测试（黑盒 + 代码审计）中定位并已修复，回归测试 13 项全部通过：
 
-- `Router.cpp` 动态路由回调把参数装进 `newReq` 后却传了原始 `req`，路径参数丢失（一行修复）；
-- `HttpServer.cpp` 的 `onMessage` 未用 `while` 包裹解析，HTTP pipelining 粘包时第二个请求延迟处理。
+- 404/500 响应缺协议版本前缀，发出的是非法 HTTP 报文 —— 框架层统一补全状态行；
+- `onMessage` 未循环解析，同一批 TCP 数据里的第二个请求（HTTP pipelining / 粘包）会滞留缓冲区 —— 改为 `while` 循环处理；
+- 动态路由回调拿到的是原始 `req` 而非注入路径参数后的 `newReq` —— 路径参数丢失；
+- 注册接口 SQL 字符串拼接（可注入）—— 全部改预处理语句；密码明文入库 —— 改哈希；
+- 同会话并发请求（双击发送）无锁竞争，实测问答错位 —— 会话级串行 + 消息向量细粒度锁；
+- MQ 消费线程异常即永久退出，消息无限积压 —— 消息级失败丢弃防毒消息重投、连接级失败退避重连；
+- 空 body / 非法 modelType 返回 500 且泄漏解析库内部报错 —— 前置参数校验统一 400；
+- 未知 sessionId 被静默创建为不出现在会话列表的"僵尸会话" —— send 登记进列表、history 不再创建。
 
-计划中的改进：数据库连接配置外置、修复上述框架层 Bug、对话响应支持 SSE 流式输出、幂等消费与失败重试。
+计划中的改进：数据库连接配置外置、对话响应支持 SSE 流式输出、MQ 持久化投递 + 重试 + 死信队列、TTS 与图像识别 Handler 迁移到业务线程池。
 
 ## License
 

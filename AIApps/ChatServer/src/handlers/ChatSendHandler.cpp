@@ -1,6 +1,24 @@
 #include "../include/handlers/ChatSendHandler.h"
 #include "../include/AIUtil/BizThreadPool.h"
 
+#include <algorithm>
+
+// 统一的参数校验失败响应（400，不泄漏内部细节）
+static bool rejectBadChatRequest(http::HttpResponse* resp, const std::string& version,
+                                 const std::string& message)
+{
+    json failureResp;
+    failureResp["status"] = "error";
+    failureResp["message"] = message;
+    std::string failureBody = failureResp.dump(4);
+    resp->setStatusLine(version, http::HttpResponse::k400BadRequest, "Bad Request");
+    resp->setCloseConnection(true);
+    resp->setContentType("application/json");
+    resp->setContentLength(failureBody.size());
+    resp->setBody(failureBody);
+    return true;
+}
+
 
 void ChatSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* resp)
 {
@@ -27,17 +45,40 @@ void ChatSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* r
         int userId = std::stoi(session->getValue("userId"));
         std::string username = session->getValue("username");
 
+        // —— 参数校验：空 body / 坏 JSON / 缺字段 / 非法 modelType 一律 400，
+        //    不把请求丢进线程池后才失败，也不回传解析库内部报错 ——
         std::string userQuestion;
-        std::string modelType;
+        std::string modelType = "1";
         std::string sessionId;
 
         auto body = req.getBody();
-        if (!body.empty()) {
-            auto j = json::parse(body);
-            if (j.contains("question")) userQuestion = j["question"];
-            if (j.contains("sessionId")) sessionId = j["sessionId"];
-
-            modelType = j.contains("modelType") ? j["modelType"].get<std::string>() : "1";
+        if (body.empty())
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "request body is required");
+            return;
+        }
+        json j;
+        try
+        {
+            j = json::parse(body);
+        }
+        catch (const std::exception&)
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "invalid request body");
+            return;
+        }
+        if (!j.contains("question") || !j.contains("sessionId"))
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "question and sessionId are required");
+            return;
+        }
+        userQuestion = j["question"];
+        sessionId = j["sessionId"];
+        if (j.contains("modelType")) modelType = j["modelType"].get<std::string>();
+        if (!StrategyFactory::instance().has(modelType))
+        {
+            rejectBadChatRequest(resp, req.getVersion(), "invalid modelType");
+            return;
         }
 
 
@@ -53,6 +94,13 @@ void ChatSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* r
                     sessionId,
                     std::make_shared<AIHelper>()
                 );
+                // 同步登记进会话列表，与 send-new-session 行为一致，
+                // 避免"存在于内存但不出现在会话列表"的僵尸会话
+                auto& idList = server_->sessionsIdsMap[userId];
+                if (std::find(idList.begin(), idList.end(), sessionId) == idList.end())
+                {
+                    idList.push_back(sessionId);
+                }
             }
             AIHelperPtr= userSessions[sessionId];
         }
@@ -80,6 +128,7 @@ void ChatSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* r
                 catch (const std::exception& e)
                 {
                     // 上游模型超时/失败：异步路径统一按 500 回包
+                    // （失败侧的错误消息已由 AIHelper::chat 在会话锁内补记入库）
                     json failureResp;
                     failureResp["status"] = "error";
                     failureResp["message"] = e.what();

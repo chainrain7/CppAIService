@@ -1,4 +1,5 @@
 #include "../include/handlers/ChatLoginHandler.h"
+#include "../include/AuthUtil.h"
 
 void ChatLoginHandler::handle(const http::HttpRequest& req, http::HttpResponse* resp)
 {
@@ -22,7 +23,8 @@ void ChatLoginHandler::handle(const http::HttpRequest& req, http::HttpResponse* 
         std::string username = parsed["username"];
         std::string password = parsed["password"];
 
-        int userId = queryUserId(username, password);
+        // 库中存的是哈希，比对时同样先哈希
+        int userId = queryUserId(username, hashPassword(username, password));
         if (userId != -1)
         {
 
@@ -56,7 +58,7 @@ void ChatLoginHandler::handle(const http::HttpRequest& req, http::HttpResponse* 
 
                 json failureResp;
                 failureResp["success"] = false;
-                failureResp["error"] = "˺ط¼";
+                failureResp["error"] = "账号已在别处登录";
                 std::string failureBody = failureResp.dump(4);
 
                 resp->setStatusLine(req.getVersion(), http::HttpResponse::k403Forbidden, "Forbidden");
@@ -86,7 +88,10 @@ void ChatLoginHandler::handle(const http::HttpRequest& req, http::HttpResponse* 
     {
         json failureResp;
         failureResp["status"] = "error";
-        failureResp["message"] = e.what();
+        // 解析库异常不回传客户端；其余异常信息保留便于排障
+        std::string msg = e.what();
+        bool isParseError = msg.find("json.exception") != std::string::npos;
+        failureResp["message"] = isParseError ? "invalid request body" : msg;
         std::string failureBody = failureResp.dump(4);
 
         resp->setStatusLine(req.getVersion(), http::HttpResponse::k400BadRequest, "Bad Request");
