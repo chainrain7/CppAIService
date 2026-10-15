@@ -10,6 +10,16 @@
 #include <chrono>
 #include <functional>
 
+// —— 队列拓扑约定（生产端 / 消费端 / 测试脚本共用）——
+// 主工作队列：业务消息（durable）
+inline constexpr const char* SQL_QUEUE = "sql_queue";
+// 重试队列：失败消息在此停留 RETRY_DELAY_MS 后经死信机制回到主队列（延迟重试）
+inline constexpr const char* SQL_QUEUE_RETRY = "sql_queue_retry";
+// 死信队列：重试耗尽的消息停留于此，等人工排查
+inline constexpr const char* SQL_QUEUE_DEAD = "sql_queue_dead";
+inline constexpr int MQ_MAX_RETRIES = 3;
+inline constexpr int MQ_RETRY_DELAY_MS = 10000;
+
 class MQManager {
 public:
     static MQManager& instance() {

@@ -1,4 +1,5 @@
 #include"../include/AIUtil/MQManager.h"
+#include"../include/AIUtil/DbMessage.h"
 
 // ------------------- MQManager -------------------
 MQManager::MQManager(size_t poolSize)
@@ -18,6 +19,8 @@ void MQManager::publish(const std::string& queue, const std::string& msg) {
 
     std::lock_guard<std::mutex> lock(conn->mtx);
     auto message = AmqpClient::BasicMessage::Create(msg);
+    // 持久化投递：配合 durable 队列，broker 重启不丢已入队的消息
+    message->DeliveryMode(AmqpClient::BasicMessage::dm_persistent);
     conn->channel->BasicPublish("", queue, message);
 }
 
@@ -36,16 +39,74 @@ void RabbitMQThreadPool::shutdown() {
     }
 }
 
+namespace {
+// 消息级失败处理：有限次延迟重试（经重试队列 TTL 回注主队列），
+// 重试耗尽转入死信队列留档。原消息确认（Ack）以完成转移。
+void handleFailedMessage(const AmqpClient::Channel::ptr_t& channel,
+                         const AmqpClient::Envelope::ptr_t& env,
+                         const std::string& err)
+{
+    const std::string body = env->Message()->Body();
+    int retry = 0;
+    bool parsed = false;
+    std::string type = "unknown";
+    try {
+        json j = json::parse(body);
+        if (j.contains("retry") && j["retry"].is_number_integer()) retry = j["retry"].get<int>();
+        if (j.contains("type") && j["type"].is_string()) type = j["type"].get<std::string>();
+        parsed = true;
+    }
+    catch (...) {}
+
+    std::cerr << "[MQ] message failed (type=" << type << " retry=" << retry
+              << "): " << err << std::endl;
+
+    try {
+        if (parsed && retry < MQ_MAX_RETRIES) {
+            json j = json::parse(body);
+            j["retry"] = retry + 1;
+            auto msg = AmqpClient::BasicMessage::Create(j.dump());
+            msg->DeliveryMode(AmqpClient::BasicMessage::dm_persistent);
+            channel->BasicPublish("", SQL_QUEUE_RETRY, msg);
+        }
+        else {
+            json dead;
+            dead["error"] = err;
+            dead["retries"] = retry;
+            dead["body"] = body;
+            auto msg = AmqpClient::BasicMessage::Create(dead.dump());
+            msg->DeliveryMode(AmqpClient::BasicMessage::dm_persistent);
+            channel->BasicPublish("", SQL_QUEUE_DEAD, msg);
+        }
+        channel->BasicAck(env);
+    }
+    catch (const std::exception& e) {
+        // 转移本身失败（channel 故障等）：丢弃原消息，避免转移-消费死循环
+        std::cerr << "[MQ] route-to-retry/dead failed, drop: " << e.what() << std::endl;
+        channel->BasicReject(env, false);
+    }
+}
+} // namespace
+
 void RabbitMQThreadPool::worker(int id) {
     while (!stop_) {
         try {
             // Each thread has its own independent channel
             auto channel = AmqpClient::Channel::Create(rabbitmq_host_, 5672, "guest", "guest", "/");
-            // set exclusive
+            // 主队列（durable，与持久化投递配合）
             channel->DeclareQueue(queue_name_, false, true, false, false);
-            // Prevent channel error: 403: AMQP_BASIC_CONSUME_METHOD caused: ACCESS_REFUSED - queue
-            // 'sql_queue' in vhost '/' in exclusive use
-            // std::string consumer_tag = channel->BasicConsume(queue_name_, "");
+
+            // 重试队列：消息停留 TTL 后经死信机制回到主队列，实现延迟重试
+            AmqpClient::Table retryArgs;
+            retryArgs["x-message-ttl"] =
+                AmqpClient::TableValue(static_cast<boost::int64_t>(MQ_RETRY_DELAY_MS));
+            retryArgs["x-dead-letter-exchange"] = AmqpClient::TableValue(std::string(""));
+            retryArgs["x-dead-letter-routing-key"] = AmqpClient::TableValue(queue_name_);
+            channel->DeclareQueue(SQL_QUEUE_RETRY, false, true, false, false, retryArgs);
+
+            // 死信队列：重试耗尽的消息留档等人工排查
+            channel->DeclareQueue(SQL_QUEUE_DEAD, false, true, false, false);
+
             std::string consumer_tag = channel->BasicConsume(queue_name_, "", true, false, false);
 
             channel->BasicQos(consumer_tag, 1);
@@ -60,11 +121,7 @@ void RabbitMQThreadPool::worker(int id) {
                         channel->BasicAck(env);
                     }
                     catch (const std::exception& e) {
-                        // 消息级失败（如坏 SQL）：记录后丢弃该消息，
-                        // 避免毒消息被无限重投卡死队列；重试+死信队列属改造B
-                        std::cerr << "Thread " << id << " message dropped, err: "
-                                  << e.what() << ", msg: " << msg << std::endl;
-                        channel->BasicReject(env, false);
+                        handleFailedMessage(channel, env, e.what());
                     }
                 }
             }
