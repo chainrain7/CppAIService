@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include <muduo/base/Timestamp.h>
+#include <muduo/net/TcpConnection.h>
 
 namespace http
 {
@@ -55,16 +56,21 @@ public:
     { return headers_; }
 
     void setBody(const std::string& body) { content_ = body; }
-    void setBody(const char* start, const char* end) 
-    { 
-        if (end >= start) 
+    void setBody(const char* start, const char* end)
+    {
+        if (end >= start)
         {
-            content_.assign(start, end - start); 
+            content_.assign(start, end - start);
         }
     }
-    
+
     std::string getBody() const
     { return content_; }
+
+    // 异步支持：框架分发前注入请求所属连接，
+    // Handler 把耗时任务移交业务线程池后，工作线程可直接通过它回包
+    void setConnection(const muduo::net::TcpConnectionPtr& conn) { conn_ = conn; }
+    const muduo::net::TcpConnectionPtr& getConnection() const { return conn_; }
 
     void setContentLength(uint64_t length)
     { contentLength_ = length; }
@@ -84,6 +90,7 @@ private:
     std::map<std::string, std::string>           headers_; // 请求头
     std::string                                  content_; // 请求体
     uint64_t                                     contentLength_ { 0 }; // 请求体长度
-};  
+    muduo::net::TcpConnectionPtr                 conn_; // 请求所属连接（框架注入）
+};
 
 } // namespace http

@@ -14,6 +14,7 @@ C++ 没有 LangChain、Spring AI 那样现成的 AI 应用生态，HTTP 封装�
 | 轻量级 MCP | `AIConfig.*` + `AIToolRegistry.*` | 工具清单配置化 + Prompt 协议化，「模型判断 → 调工具 → 二次回答」两段式推理，对齐 Model Context Protocol 核心理念 |
 | 多会话管理 | `AIApps/ChatServer/include/ChatServer.h` | `unordered_map<userId, map<sessionId, AIHelper>>` 两级隔离，单用户多会话互不串上下文 |
 | 异步入库 | `AIApps/ChatServer/*/**/MQManager.*` | RabbitMQ 承载持久化写库：前台同步写内存、异步入库，消费线程池执行 SQL，主链路零阻塞 |
+| LLM 调用异步化 | `AIApps/ChatServer/include/AIUtil/BizThreadPool.h` | 手写业务线程池（任务队列 + 条件变量）：秒级大模型调用移出 muduo IO 线程，工作线程完成后经 `TcpConnection` 直接回包；curl 带连接 / 总超时 |
 | 语音链路 | `AIApps/ChatServer/*/**/AISpeechProcessor.*` | 百度 TTS（建任务 → 轮询 → 取音频 URL）+ ASR 接口封装 |
 | 图像识别 | `AIApps/ChatServer/*/**/ImageRecognizer.*` | ONNX Runtime + OpenCV 预处理，本地推理，不依赖云端视觉 API |
 | 容器化交付 | `deploy/docker-compose.yml` | MySQL 8 + RabbitMQ 一键拉起，首次启动自动建库建表 |
@@ -30,7 +31,8 @@ HttpServer 自研框架层（muduo 多线程 Reactor）
 ChatServer 业务层
    │   13 个路由 Handler · 注册登录 · 多会话隔离
    │
-   ├─► AIUtil 模型层（策略模式 + 注册式工厂，请求级切换）
+   ├─► BizThreadPool 业务线程池 ── LLM 调用异步化，不占 IO 线程
+   │      └─► AIUtil 模型层（策略模式 + 注册式工厂，请求级切换）
    │      ├─ 阿里百炼 通义（modelType=1）
    │      ├─ DeepSeek（modelType=2）
    │      ├─ 百炼 RAG 应用，知识库问答（modelType=3）
@@ -42,7 +44,7 @@ ChatServer 业务层
    └─► MySQL  连接池访问；重启时全量回灌，重建内存会话
 ```
 
-**一次对话的主链路**：`POST /chat/send` → Session 校验 → 取该用户该会话的 `AIHelper` → 按 `modelType` 从工厂取策略 → CURL 调用对应厂商 HTTPS API（MCP 策略则先走工具判断）→ 响应返回前端，同时把用户消息与 AI 回复拼成 INSERT 发到 RabbitMQ → 消费线程异步入库 → 服务重启时 `readDataFromMySQL()` 按时间序回灌，完整还原所有会话。
+**一次对话的主链路**：`POST /chat/send` → Session 校验 → 取该用户该会话的 `AIHelper` → **任务移交业务线程池，IO 线程立即返回** → 工作线程按 `modelType` 从工厂取策略，CURL 调用对应厂商 HTTPS API（MCP 策略则先走工具判断）→ 拿到回答后直接通过 `TcpConnection` 异步回包，同时把用户消息与 AI 回复拼成 INSERT 发到 RabbitMQ → 消费线程异步入库 → 服务重启时 `readDataFromMySQL()` 按时间序回灌，完整还原所有会话。
 
 ## 目录结构
 
@@ -160,6 +162,18 @@ static StrategyRegister<AliyunMcpStrategy> regAliyunMcp("4");
 2. **执行段**：输出合法 JSON 则经 `AIToolRegistry` 调本地工具，把结果二次喂给模型组织回答，否则直接透传。
 
 这套「模型判断 → 工具调用 → 二次回答」的闭环与 Model Context Protocol 的核心思想一致，是理解 Function Calling 的最小可运行实现。
+
+### LLM 调用异步化：业务线程池 + 超时控制
+
+**问题**：路由 → Handler → 大模型调用整条链路原本跑在 muduo 的 IO 线程上，一次 10 秒的 LLM 调用会卡住同一 EventLoop 上所有连接的收发；且 curl 未设超时，模型不可达时请求无限挂起。
+
+**方案**分三层：
+
+1. `AIHelper::executeCurl` 设置 `CURLOPT_CONNECTTIMEOUT=5s` / `CURLOPT_TIMEOUT=60s` / `CURLOPT_NOSIGNAL`（多线程下 DNS 解析禁用信号量），上游不可达快速失败；
+2. 手写 `BizThreadPool`（任务队列 + 条件变量，含优雅关闭与任务异常兜底），LLM 调用整体移交池内 8 个工作线程；
+3. 框架层做最小扩展支持异步回包：`HttpRequest` 注入所属连接、`HttpResponse` 增加 deferred 标志；Handler 投递任务后立即返回，工作线程完成后自行构造响应并 `TcpConnection::send`（muduo 线程安全，自动转投回所属 EventLoop）。
+
+**验收方式**：两个浏览器窗口，A 发长问题、B 同时发短问题——B 的响应不再被 A 卡住。
 
 ### 多会话与崩溃恢复
 

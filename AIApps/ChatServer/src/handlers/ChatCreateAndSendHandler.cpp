@@ -1,4 +1,5 @@
 #include "../include/handlers/ChatCreateAndSendHandler.h"
+#include "../include/AIUtil/BizThreadPool.h"
 
 
 void ChatCreateAndSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* resp)
@@ -40,7 +41,7 @@ void ChatCreateAndSendHandler::handle(const http::HttpRequest& req, http::HttpRe
 
         AISessionIdGenerator generator;
         std::string sessionId = generator.generate();
-        std::cout<<"ɵsessionIdΪ "<<sessionId<<std::endl;
+        std::cout << "generated sessionId: " << sessionId << std::endl;
 
 
         std::shared_ptr<AIHelper> AIHelperPtr;
@@ -51,7 +52,7 @@ void ChatCreateAndSendHandler::handle(const http::HttpRequest& req, http::HttpRe
 
             if (userSessions.find(sessionId) == userSessions.end()) {
 
-                userSessions.emplace( 
+                userSessions.emplace(
                     sessionId,
                     std::make_shared<AIHelper>()
                 );
@@ -61,19 +62,50 @@ void ChatCreateAndSendHandler::handle(const http::HttpRequest& req, http::HttpRe
 
         }
 
-        std::string aiInformation=AIHelperPtr->chat(userId, username,sessionId, userQuestion, modelType);
-        json successResp;
-        successResp["success"] = true;
-        successResp["Information"] = aiInformation;
-        successResp["sessionId"] = sessionId;
-        
-        std::string successBody = successResp.dump(4);
+        // LLM 调用移交业务线程池，IO 线程立即返回（与 ChatSendHandler 同一模式）
+        auto conn = req.getConnection();
+        std::string version = req.getVersion();
 
-        resp->setStatusLine(req.getVersion(), http::HttpResponse::k200Ok, "OK");
-        resp->setCloseConnection(false);
-        resp->setContentType("application/json");
-        resp->setContentLength(successBody.size());
-        resp->setBody(successBody);
+        BizThreadPool::instance().enqueue(
+            [conn, AIHelperPtr, userId, username, sessionId, userQuestion, modelType, version]()
+            {
+                std::string bodyStr;
+                http::HttpResponse::HttpStatusCode code = http::HttpResponse::k200Ok;
+                std::string statusMsg = "OK";
+                try
+                {
+                    std::string aiInformation = AIHelperPtr->chat(userId, username, sessionId, userQuestion, modelType);
+                    json successResp;
+                    successResp["success"] = true;
+                    successResp["Information"] = aiInformation;
+                    successResp["sessionId"] = sessionId;
+                    bodyStr = successResp.dump(4);
+                }
+                catch (const std::exception& e)
+                {
+                    json failureResp;
+                    failureResp["status"] = "error";
+                    failureResp["message"] = e.what();
+                    bodyStr = failureResp.dump(4);
+                    code = http::HttpResponse::k500InternalServerError;
+                    statusMsg = "Internal Server Error";
+                }
+
+                http::HttpResponse response(false);
+                response.setStatusLine(version, code, statusMsg);
+                response.setCloseConnection(false);
+                response.setContentType("application/json");
+                response.setContentLength(bodyStr.size());
+                response.setBody(bodyStr);
+                response.addHeader("Access-Control-Allow-Origin", "*");
+
+                muduo::net::Buffer buf;
+                response.appendToBuffer(&buf);
+                conn->send(&buf);
+            });
+
+        // 标记延迟：框架层跳过同步回包，响应由工作线程发送
+        resp->markDeferred();
         return;
     }
     catch (const std::exception& e)
@@ -90,12 +122,3 @@ void ChatCreateAndSendHandler::handle(const http::HttpRequest& req, http::HttpRe
         resp->setBody(failureBody);
     }
 }
-
-
-
-
-
-
-
-
-

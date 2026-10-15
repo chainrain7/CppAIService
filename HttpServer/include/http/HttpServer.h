@@ -124,7 +124,7 @@ private:
     void onMessage(const muduo::net::TcpConnectionPtr& conn,
                    muduo::net::Buffer* buf,
                    muduo::Timestamp receiveTime);
-    void onRequest(const muduo::net::TcpConnectionPtr&, const HttpRequest&);
+    void onRequest(const muduo::net::TcpConnectionPtr&, HttpRequest&);
 
     void handleRequest(const HttpRequest& req, HttpResponse* resp);
     

@@ -1,4 +1,5 @@
 #include "../include/handlers/ChatSendHandler.h"
+#include "../include/AIUtil/BizThreadPool.h"
 
 
 void ChatSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* resp)
@@ -48,26 +49,60 @@ void ChatSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* r
 
             if (userSessions.find(sessionId) == userSessions.end()) {
 
-                userSessions.emplace( 
+                userSessions.emplace(
                     sessionId,
                     std::make_shared<AIHelper>()
                 );
             }
             AIHelperPtr= userSessions[sessionId];
         }
-        
 
-        std::string aiInformation=AIHelperPtr->chat(userId, username,sessionId, userQuestion, modelType);
-        json successResp;
-        successResp["success"] = true;
-        successResp["Information"] = aiInformation;
-        std::string successBody = successResp.dump(4);
+        // LLM 调用是秒级阻塞 IO，不能占着 muduo IO 线程：
+        // 移交业务线程池，IO 线程立即返回处理其他连接，
+        // 工作线程完成后直接通过 TcpConnection 异步回包（muduo 的 send 线程安全）
+        auto conn = req.getConnection();
+        std::string version = req.getVersion();
 
-        resp->setStatusLine(req.getVersion(), http::HttpResponse::k200Ok, "OK");
-        resp->setCloseConnection(false);
-        resp->setContentType("application/json");
-        resp->setContentLength(successBody.size());
-        resp->setBody(successBody);
+        BizThreadPool::instance().enqueue(
+            [conn, AIHelperPtr, userId, username, sessionId, userQuestion, modelType, version]()
+            {
+                std::string bodyStr;
+                http::HttpResponse::HttpStatusCode code = http::HttpResponse::k200Ok;
+                std::string statusMsg = "OK";
+                try
+                {
+                    std::string aiInformation = AIHelperPtr->chat(userId, username, sessionId, userQuestion, modelType);
+                    json successResp;
+                    successResp["success"] = true;
+                    successResp["Information"] = aiInformation;
+                    bodyStr = successResp.dump(4);
+                }
+                catch (const std::exception& e)
+                {
+                    // 上游模型超时/失败：异步路径统一按 500 回包
+                    json failureResp;
+                    failureResp["status"] = "error";
+                    failureResp["message"] = e.what();
+                    bodyStr = failureResp.dump(4);
+                    code = http::HttpResponse::k500InternalServerError;
+                    statusMsg = "Internal Server Error";
+                }
+
+                http::HttpResponse response(false);
+                response.setStatusLine(version, code, statusMsg);
+                response.setCloseConnection(false);
+                response.setContentType("application/json");
+                response.setContentLength(bodyStr.size());
+                response.setBody(bodyStr);
+                response.addHeader("Access-Control-Allow-Origin", "*");
+
+                muduo::net::Buffer buf;
+                response.appendToBuffer(&buf);
+                conn->send(&buf);
+            });
+
+        // 标记延迟：框架层跳过同步回包，响应由上面的工作线程发送
+        resp->markDeferred();
         return;
     }
     catch (const std::exception& e)
@@ -84,12 +119,3 @@ void ChatSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* r
         resp->setBody(failureBody);
     }
 }
-
-
-
-
-
-
-
-
-

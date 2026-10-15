@@ -151,6 +151,12 @@ json AIHelper::executeCurl(const json& payload) {
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payloadStr.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+    // 多线程下必须禁用信号超时机制，否则 DNS 解析阶段可能崩溃
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    // 连接超时 5s：厂商 API 不可达时快速失败
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    // 总超时 60s：LLM 长回答留足余量，杜绝无限挂起
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
 
     CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
