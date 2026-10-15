@@ -43,6 +43,14 @@ public:
 
     bool closeConnection() const
     { return closeConnection_; }
+
+    // 异步支持：Handler 把耗时任务移交业务线程池后调用，
+    // 框架层跳过同步回包，响应由工作线程通过 TcpConnection 异步发送
+    void markDeferred()
+    { deferred_ = true; }
+
+    bool deferred() const
+    { return deferred_; }
     
     void setContentType(const std::string& contentType)
     { addHeader("Content-Type", contentType); }
@@ -74,6 +82,7 @@ private:
     std::map<std::string, std::string> headers_;
     std::string                        body_;
     bool                               isFile_;
+    bool                               deferred_ = false;
 };
 
 } // namespace http

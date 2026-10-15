@@ -142,15 +142,25 @@ void HttpServer::onMessage(const muduo::net::TcpConnectionPtr &conn,
     }
 }
 
-void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpRequest &req)
+void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, HttpRequest &req)
 {
     const std::string &connection = req.getHeader("Connection");
     bool close = ((connection == "close") ||
                   (req.getVersion() == "HTTP/1.0" && connection != "Keep-Alive"));
     HttpResponse response(close);
 
+    // 注入请求所属连接：异步 Handler 把耗时任务移交业务线程池后，
+    // 工作线程通过 req.getConnection() 直接回包（muduo 的 send 线程安全）
+    req.setConnection(conn);
+
     // 根据请求报文信息来封装响应报文对象
     httpCallback_(req, &response); // 执行onHttpCallback函数
+
+    // Handler 已把任务移交业务线程池：响应将由工作线程异步发送，框架层跳过
+    if (response.deferred())
+    {
+        return;
+    }
 
     // 可以给response设置一个成员，判断是否请求的是文件，如果是文件设置为true，并且存在文件位置在这里send出去。
     muduo::net::Buffer buf;
