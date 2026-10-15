@@ -34,19 +34,27 @@ public:
     void cleanup();
 
     template<typename... Args>
-    sql::ResultSet* executeQuery(const std::string& sql, Args&&... args)
+    std::shared_ptr<sql::ResultSet> executeQuery(const std::string& sql, Args&&... args)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        try 
+        try
         {
             // 直接创建新的预处理语句，不使用缓存
             std::unique_ptr<sql::PreparedStatement> stmt(
                 conn_->prepareStatement(sql)
             );
             bindParams(stmt.get(), 1, std::forward<Args>(args)...);
-            return stmt->executeQuery();
-        } 
-        catch (const sql::SQLException& e) 
+            sql::ResultSet* raw = stmt->executeQuery();
+            // ResultSet 的生命周期挂在 PreparedStatement 上：必须让返回值
+            // 持有 stmt，调用方用完后先删 ResultSet 再析构 stmt。
+            // 旧实现返回裸指针、stmt 在函数内析构，调用方 res->next() 是悬垂 UAF
+            return std::shared_ptr<sql::ResultSet>(raw,
+                [stmt = std::move(stmt)](sql::ResultSet* rs) mutable {
+                    delete rs;
+                    stmt.reset();
+                });
+        }
+        catch (const sql::SQLException& e)
         {
             LOG_ERROR << "Query failed: " << e.what() << ", SQL: " << sql;
             throw DbException(e.what());

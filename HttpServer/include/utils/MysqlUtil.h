@@ -18,10 +18,13 @@ public:
     }
 
     template<typename... Args>
-    sql::ResultSet* executeQuery(const std::string& sql, Args&&... args)
+    std::shared_ptr<sql::ResultSet> executeQuery(const std::string& sql, Args&&... args)
     {
         auto conn = http::db::DbConnectionPool::getInstance().getConnection();
-        return conn->executeQuery(sql, std::forward<Args>(args)...);
+        auto rs = conn->executeQuery(sql, std::forward<Args>(args)...);
+        // ResultSet 同时持有池化连接：调用方迭代期间连接不会提前归还
+        // 被其它线程复用（旧实现连接在函数返回时就回池了）
+        return std::shared_ptr<sql::ResultSet>(rs.get(), [rs, conn](sql::ResultSet*) {});
     }
 
     template<typename... Args>
