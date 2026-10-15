@@ -13,7 +13,7 @@ C++ 没有 LangChain、Spring AI 那样现成的 AI 应用生态，HTTP 封装�
 | 注册式工厂 | `AIApps/ChatServer/include/AIUtil/AIFactory.h` | `StrategyRegister<T>` 静态自注册，新增一个模型只加一个 cpp，不改工厂代码 |
 | 轻量级 MCP | `AIConfig.*` + `AIToolRegistry.*` | 工具清单配置化 + Prompt 协议化，「模型判断 → 调工具 → 二次回答」两段式推理，对齐 Model Context Protocol 核心理念 |
 | 多会话管理 | `AIApps/ChatServer/include/ChatServer.h` | `unordered_map<userId, map<sessionId, AIHelper>>` 两级隔离，单用户多会话互不串上下文 |
-| 异步入库 | `AIApps/ChatServer/*/**/MQManager.*` | RabbitMQ 承载持久化写库：前台同步写内存、异步入库，消费线程池执行 SQL，主链路零阻塞；消费线程断线自动重连 |
+| 异步入库 | `AIApps/ChatServer/*/**/MQManager.*` | RabbitMQ 承载持久化写库：前台同步写内存、异步入库，主链路零阻塞；持久化投递 + 失败延迟重试 + 死信队列留档，消息体为 JSON、消费端走预处理语句（无注入面），消费线程断线自动重连 |
 | LLM 调用异步化 | `AIApps/ChatServer/include/AIUtil/BizThreadPool.h` | 手写业务线程池（任务队列 + 条件变量）：秒级大模型调用移出 muduo IO 线程，工作线程完成后经 `TcpConnection` 直接回包；curl 带连接 / 总超时 |
 | 会话级并发控制 | `AIHelper` 内置双粒度锁 | 同会话请求排队执行（问答保序、上下文不被并发污染），不同会话并行 |
 | 安全加固 | 注册/登录 + 参数校验 | 注册走预处理语句（杜绝 SQL 注入），密码 SHA256(用户名做盐) 哈希入库，请求参数前置校验统一 400 |
@@ -181,9 +181,17 @@ static StrategyRegister<AliyunMcpStrategy> regAliyunMcp("4");
 
 会话按 `unordered_map<userId, map<sessionId, AIHelper>>` 两级隔离，每个会话持有独立的上下文。消息**同步写内存、异步入库**；服务重启时 `readDataFromMySQL()` 按 `(ts, id)` 全量回灌，内存中的会话与上下文完整重建——对用户表现为"聊天记录永不丢失"。
 
-### 异步入库：RabbitMQ + 消费线程池
+### 异步入库：RabbitMQ + 可靠性三板斧
 
-Handler 不直接写库，而是把拼好的 INSERT 发布到 `sql_queue`；`main.cpp` 启动的 `RabbitMQThreadPool`（2 个消费线程）取出后经 MySQL 工具类执行。主链路只依赖内存写入即可返回，数据库抖动不会拖慢对话响应，也天然把"读旧库、写新库"的扩展点留了出来。
+Handler 不直接写库，而是把消息发布到 `sql_queue`；`main.cpp` 启动的 `RabbitMQThreadPool`（2 个消费线程）取出后解析并执行。主链路只依赖内存写入即可返回，数据库抖动不会拖慢对话响应。
+
+可靠性三板斧：
+
+1. **持久化投递**：发布端 `dm_persistent` + 队列 `durable=true`，broker 重启不丢已入队消息；
+2. **失败延迟重试**：消息处理失败（坏消息 / 数据库异常）时进入 `sql_queue_retry`（TTL 10s，到期经死信机制回注主队列），消息体自带 `retry` 计数，最多重试 3 次；
+3. **死信队列兜底**：重试耗尽转入 `sql_queue_dead` 留档（含错误原因、重试次数、原始消息），等人工排查；实测注入缺字段消息，完整走完 `retry=0→1→2→3` 后落入死信队列。
+
+消息体为 JSON（字段定义见 `DbMessage.h`，生产/消费两端共享），消费端解析后走预处理语句写库——队列里不再传递拼接 SQL，从根上消除注入面。消费线程异常不断线：消息级失败走重试/死信，连接级失败退避重连。
 
 ## 配置说明
 
@@ -208,7 +216,7 @@ Handler 不直接写库，而是把拼好的 INSERT 发布到 `sql_queue`；`mai
 
 补充测试后追加修复：基础设施（MySQL 等）启动期不可用时不再 core dump，而是报明原因退出；TTS 失败显式返回错误原因（不再吞成空 URL 假成功），且整条「建任务→轮询→取 URL」链路已迁移到业务线程池；图像识别模型路径支持 `ONNX_MODEL_PATH` 环境变量配置。
 
-计划中的改进：数据库连接配置外置、对话响应支持 SSE 流式输出、MQ 持久化投递 + 重试 + 死信队列、图像识别 Handler 迁移到业务线程池。
+计划中的改进：数据库连接配置外置、对话响应支持 SSE 流式输出、图像识别 Handler 迁移到业务线程池。
 
 ## 性能
 

@@ -41,7 +41,6 @@ public:
     std::vector<std::pair<std::string, long long>> GetMessages();
 
 private:
-    std::string escapeString(const std::string& input);
     // chat 的实际实现（调用方已持有 sessionMutex_）
     std::string chatInternal(int userId, std::string userName, std::string sessionId, std::string userQuestion, std::string modelType);
     //加入到mysql的接口（提供加入到线程池的接口，线程池做异步mysql更新操作）

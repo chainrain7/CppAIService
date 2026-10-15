@@ -1,5 +1,6 @@
 #include <string>
 #include <iostream>
+#include <stdexcept>
 #include <thread>
 #include <chrono>
 #include <muduo/net/TcpServer.h>
@@ -9,14 +10,33 @@
 
 #include"../include/ChatServer.h"
 #include "../include/AIUtil/BizThreadPool.h"
+#include "../include/AIUtil/DbMessage.h"
+#include "../include/AIUtil/MQManager.h"
 
 const std::string RABBITMQ_HOST = "localhost";
-const std::string QUEUE_NAME = "sql_queue";
 const int THREAD_NUM = 2;
 
-void executeMysql(const std::string sql) {
-    http::MysqlUtil mysqlUtil_;
-    mysqlUtil_.executeUpdate(sql);
+// MQ 消费回调：解析 JSON 消息并按类型分发到对应写库操作。
+// 抛出的异常由 MQ worker 捕获，走重试队列/死信队列兜底
+void executeMysql(const std::string message) {
+    json j = json::parse(message);
+    const std::string type = j.at("type").get<std::string>();
+
+    if (type == kMsgTypeChatMessageInsert) {
+        http::MysqlUtil mysqlUtil_;
+        // 预处理语句传参，消息内容不再拼接 SQL
+        mysqlUtil_.executeUpdate(
+            "INSERT INTO chat_message (id, username, session_id, is_user, content, ts) VALUES (?, ?, ?, ?, ?, ?)",
+            j.at("id").get<int>(),
+            j.at("username").get<std::string>(),
+            j.at("session_id").get<std::string>(),
+            j.at("is_user").get<int>(),
+            j.at("content").get<std::string>(),
+            j.at("ts").get<std::int64_t>());
+    }
+    else {
+        throw std::runtime_error("unknown message type: " + type);
+    }
 }
 
 
@@ -59,7 +79,7 @@ int main(int argc, char* argv[]) {
         server.initChatMessage();
 
 
-        RabbitMQThreadPool pool(RABBITMQ_HOST, QUEUE_NAME, THREAD_NUM, executeMysql);
+        RabbitMQThreadPool pool(RABBITMQ_HOST, SQL_QUEUE, THREAD_NUM, executeMysql);
         pool.start();
 
         server.start();

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <mutex>
@@ -95,6 +96,10 @@ private:
         using U = std::remove_cv_t<std::remove_reference_t<T>>;
         if constexpr (std::is_same_v<U, std::string>) {
             stmt->setString(index, std::forward<T>(value));
+        }
+        else if constexpr (std::is_same_v<U, std::int64_t>) {
+            // 64 位整数（如毫秒时间戳）必须走 setInt64：setInt 是 32 位会截断
+            stmt->setInt64(index, static_cast<std::int64_t>(std::forward<T>(value)));
         }
         else if constexpr (std::is_integral_v<U>) {
             stmt->setInt(index, static_cast<int>(std::forward<T>(value)));
