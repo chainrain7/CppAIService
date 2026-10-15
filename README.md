@@ -189,6 +189,7 @@ Handler 不直接写库，而是把拼好的 INSERT 发布到 `sql_queue`；`mai
 
 - **模型密钥**全部走环境变量（见快速开始第 3 步），代码仓库不含任何密钥，也不会打印到日志。
 - **密码存储**：`SHA256(username::password)`（用户名做盐）哈希后入库，库中不落明文。
+- **图像识别模型**：路径由环境变量 `ONNX_MODEL_PATH` 指定（默认 `/root/models/mobilenetv2/mobilenetv2-7.onnx`），文件缺失时接口返回明确错误而不是模糊异常。
 - **`AIApps/ChatServer/resource/config.json`**：工具清单（`tools`）与两段式推理的 Prompt 模板（`prompt_template`）。
 - **数据库连接**目前写死在 `ChatServer.cpp`（`root/123456@127.0.0.1:3306/ChatHttpServer`），与 `docker-compose.yml` 保持一致；改密码需两处同步（已列入改进项）。
 
@@ -205,7 +206,9 @@ Handler 不直接写库，而是把拼好的 INSERT 发布到 `sql_queue`；`mai
 - 空 body / 非法 modelType 返回 500 且泄漏解析库内部报错 —— 前置参数校验统一 400；
 - 未知 sessionId 被静默创建为不出现在会话列表的"僵尸会话" —— send 登记进列表、history 不再创建。
 
-计划中的改进：数据库连接配置外置、对话响应支持 SSE 流式输出、MQ 持久化投递 + 重试 + 死信队列、TTS 与图像识别 Handler 迁移到业务线程池。
+补充测试后追加修复：基础设施（MySQL 等）启动期不可用时不再 core dump，而是报明原因退出；TTS 失败显式返回错误原因（不再吞成空 URL 假成功），且整条「建任务→轮询→取 URL」链路已迁移到业务线程池；图像识别模型路径支持 `ONNX_MODEL_PATH` 环境变量配置。
+
+计划中的改进：数据库连接配置外置、对话响应支持 SSE 流式输出、MQ 持久化投递 + 重试 + 死信队列、图像识别 Handler 迁移到业务线程池。
 
 ## License
 

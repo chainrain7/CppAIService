@@ -1,5 +1,22 @@
 #include "../include/handlers/AIUploadSendHandler.h"
 
+#include <fstream>
+
+// 模型路径可用环境变量 ONNX_MODEL_PATH 指定，缺省为默认位置
+static std::string resolveModelPath() {
+    const char* envPath = std::getenv("ONNX_MODEL_PATH");
+    std::string modelPath = (envPath && *envPath)
+        ? std::string(envPath)
+        : "/root/models/mobilenetv2/mobilenetv2-7.onnx";
+
+    std::ifstream f(modelPath.c_str());
+    if (!f.good()) {
+        throw std::runtime_error("ONNX 模型文件不存在: " + modelPath +
+                                 "（可通过环境变量 ONNX_MODEL_PATH 指定）");
+    }
+    return modelPath;
+}
+
 
 void AIUploadSendHandler::handle(const http::HttpRequest& req, http::HttpResponse* resp)
 {
@@ -30,7 +47,7 @@ void AIUploadSendHandler::handle(const http::HttpRequest& req, http::HttpRespons
 
                 server_->ImageRecognizerMap.emplace(
                     userId,
-                    std::make_shared<ImageRecognizer>("/root/models/mobilenetv2/mobilenetv2-7.onnx")  //todo:Remove hard coding
+                    std::make_shared<ImageRecognizer>(resolveModelPath())
                 );
             }
             ImageRecognizerPtr = server_->ImageRecognizerMap[userId];
