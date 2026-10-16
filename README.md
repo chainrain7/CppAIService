@@ -16,10 +16,12 @@ C++ 没有 LangChain、Spring AI 那样现成的 AI 应用生态，HTTP 封装�
 | 异步入库 | `AIApps/ChatServer/*/**/MQManager.*` | RabbitMQ 承载持久化写库：前台同步写内存、异步入库，主链路零阻塞；持久化投递 + 失败延迟重试 + 死信队列留档，消息体为 JSON、消费端走预处理语句（无注入面），消费线程断线自动重连 |
 | LLM 调用异步化 | `AIApps/ChatServer/include/AIUtil/BizThreadPool.h` | 手写业务线程池（任务队列 + 条件变量）：秒级大模型调用移出 muduo IO 线程，工作线程完成后经 `TcpConnection` 直接回包；curl 带连接 / 总超时 |
 | 会话级并发控制 | `AIHelper` 内置双粒度锁 | 同会话请求排队执行（问答保序、上下文不被并发污染），不同会话并行 |
+| SSE 流式输出 | `POST /chat/send-stream` | 服务端逐帧转发大模型增量（`text/event-stream`），前端 `fetch` + `ReadableStream` 打字机式渲染；RAG/MCP 自动退化为单次全量，协议统一 |
+| 上下文窗口管理 | `AIHelper::contextWindow` | 发给模型的只保留最近 N 条（默认 20，`AI_CONTEXT_WINDOW` 可配），起始下标对齐偶数保证角色交替正确 |
 | 安全加固 | 注册/登录 + 参数校验 | 注册走预处理语句（杜绝 SQL 注入），密码 SHA256(用户名做盐) 哈希入库，请求参数前置校验统一 400 |
 | 语音链路 | `AIApps/ChatServer/*/**/AISpeechProcessor.*` | 百度 TTS（建任务 → 轮询 → 取音频 URL）+ ASR 接口封装 |
 | 图像识别 | `AIApps/ChatServer/*/**/ImageRecognizer.*` | ONNX Runtime + OpenCV 预处理，本地推理，不依赖云端视觉 API |
-| 容器化交付 | `deploy/docker-compose.yml` | MySQL 8 + RabbitMQ 一键拉起，首次启动自动建库建表 |
+| 容器化交付 | `Dockerfile` + `deploy/docker-compose.yml` | 应用多阶段构建（builder 编译 / runtime 只带运行库，镜像数百 MB），MySQL + RabbitMQ + 应用可一条命令全栈拉起 |
 
 ## 总体架构
 
@@ -97,9 +99,15 @@ sudo apt install -y build-essential cmake libssl-dev libcurl4-openssl-dev \
 ```bash
 cd deploy
 docker compose up -d
-# MySQL: 127.0.0.1:3306  root/123456（与代码中写死的一致，改密码需同步改 ChatServer.cpp）
+# MySQL: 127.0.0.1:3306  root/123456（可用环境变量 MYSQL_HOST/USER/PASSWORD/DATABASE 覆盖）
 # RabbitMQ 管理台: http://localhost:15672  guest/guest
 # 首次启动自动执行 init/01-init.sql 建库建表
+```
+
+一条命令拉起**含应用本体的全栈**（多阶段 Dockerfile 构建，密钥从宿主机环境变量透传）：
+
+```bash
+DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx docker compose --profile app up -d --build
 ```
 
 ### 3. 配置模型密钥（环境变量）
@@ -177,6 +185,12 @@ static StrategyRegister<AliyunMcpStrategy> regAliyunMcp("4");
 
 **验收方式**：两个浏览器窗口，A 发长问题、B 同时发短问题——B 的响应不再被 A 卡住。
 
+### SSE 流式输出与上下文窗口
+
+**流式链路**：`/chat/send-stream` 把大模型 API 的 SSE 响应逐帧转发给浏览器——`executeCurlStream` 在 curl 写回调里增量解析 `data: {...}` 行，每段增量经 `TcpConnection` 直发（工作线程池内，不占 IO 线程），前端 `ReadableStream` 逐帧渲染。事件协议：`sessionId`（新会话）→ 多个 `delta` → `error`（可选）→ `[DONE]`。不支持流式的策略（RAG/MCP）在服务端退化为一次性全量回调，前端协议保持统一。
+
+**上下文窗口**：会话消息无限增长会超出模型上下文上限且token 费用线性上涨。`contextWindow()` 只把最近 N 条（默认 20 = 10 轮）发给模型，起始下标对齐到偶数索引——`buildRequest` 按下标奇偶分配 user/assistant 角色，错位一位就会把角色说反。
+
 ### 多会话与崩溃恢复
 
 会话按 `unordered_map<userId, map<sessionId, AIHelper>>` 两级隔离，每个会话持有独立的上下文。消息**同步写内存、异步入库**；服务重启时 `readDataFromMySQL()` 按 `(ts, id)` 全量回灌，内存中的会话与上下文完整重建——对用户表现为"聊天记录永不丢失"。
@@ -196,10 +210,11 @@ Handler 不直接写库，而是把消息发布到 `sql_queue`；`main.cpp` 启�
 ## 配置说明
 
 - **模型密钥**全部走环境变量（见快速开始第 3 步），代码仓库不含任何密钥，也不会打印到日志。
+- **数据库连接**环境变量：`MYSQL_HOST`（默认 127.0.0.1）、`MYSQL_PORT`（3306）、`MYSQL_USER`（root）、`MYSQL_PASSWORD`（123456）、`MYSQL_DATABASE`（ChatHttpServer）——容器部署时指向服务名 `mysql`。
+- **上下文窗口**：`AI_CONTEXT_WINDOW`（默认 20 条 = 10 轮问答）。
 - **密码存储**：`SHA256(username::password)`（用户名做盐）哈希后入库，库中不落明文。
 - **图像识别模型**：路径由环境变量 `ONNX_MODEL_PATH` 指定（默认 `/root/models/mobilenetv2/mobilenetv2-7.onnx`），文件缺失时接口返回明确错误而不是模糊异常。
 - **`AIApps/ChatServer/resource/config.json`**：工具清单（`tools`）与两段式推理的 Prompt 模板（`prompt_template`）。
-- **数据库连接**目前写死在 `ChatServer.cpp`（`root/123456@127.0.0.1:3306/ChatHttpServer`），与 `docker-compose.yml` 保持一致；改密码需两处同步（已列入改进项）。
 
 ## 已知问题与改进计划
 
@@ -216,7 +231,9 @@ Handler 不直接写库，而是把消息发布到 `sql_queue`；`main.cpp` 启�
 
 补充测试后追加修复：基础设施（MySQL 等）启动期不可用时不再 core dump，而是报明原因退出；TTS 失败显式返回错误原因（不再吞成空 URL 假成功），且整条「建任务→轮询→取 URL」链路已迁移到业务线程池；图像识别模型路径支持 `ONNX_MODEL_PATH` 环境变量配置。
 
-计划中的改进：数据库连接配置外置、对话响应支持 SSE 流式输出、图像识别 Handler 迁移到业务线程池。
+后续完成的改造：数据库连接已环境变量化（`MYSQL_HOST` 等）、对话响应支持 SSE 流式输出、上下文滑动窗口管理（`AI_CONTEXT_WINDOW`）、应用本体多阶段 Dockerfile + compose 全栈编排。
+
+计划中的改进：图像识别 Handler 迁移到业务线程池。
 
 ## 性能
 

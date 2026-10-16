@@ -29,6 +29,16 @@ public:
 
     virtual std::string parseResponse(const json& response) const = 0;
 
+    // 是否支持流式输出（OpenAI 兼容的 SSE stream 接口）
+    virtual bool supportsStream() const { return false; }
+
+    // 流式请求体：默认在普通请求体上加 stream=true
+    virtual json buildStreamRequest(const std::vector<std::pair<std::string, long long>>& messages) const {
+        json payload = buildRequest(messages);
+        payload["stream"] = true;
+        return payload;
+    }
+
     bool isMCPModel = false;
 
 };
@@ -46,6 +56,7 @@ public:
     std::string getApiUrl() const override;
     std::string getApiKey() const override;
     std::string getModel() const override;
+    bool supportsStream() const override { return true; }
 
     json buildRequest(const std::vector<std::pair<std::string, long long>>& messages) const override;
     std::string parseResponse(const json& response) const override;
@@ -66,6 +77,7 @@ public:
     std::string getApiUrl() const override;
     std::string getApiKey() const override;
     std::string getModel() const override;
+    bool supportsStream() const override { return true; }
 
     json buildRequest(const std::vector<std::pair<std::string, long long>>& messages) const override;
     std::string parseResponse(const json& response) const override;

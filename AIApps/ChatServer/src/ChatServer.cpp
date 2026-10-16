@@ -2,6 +2,7 @@
 #include "../include/handlers/ChatRegisterHandler.h"
 #include "../include/handlers/ChatLogoutHandler.h"
 #include"../include/handlers/ChatHandler.h"
+#include "../include/handlers/ChatStreamHandler.h"
 #include "../include/handlers/StaticAssetHandler.h"
 #include "../include/handlers/NotFoundPageHandler.h"
 #include"../include/handlers/ChatEntryHandler.h"
@@ -34,9 +35,24 @@ ChatServer::ChatServer(int port,
     initialize();
 }
 
+namespace {
+// 环境变量读取：带默认值（容器里 MySQL 是服务名 cppai-mysql，本机是 127.0.0.1）
+std::string envOr(const char* name, const std::string& def) {
+    const char* v = std::getenv(name);
+    return (v && *v) ? std::string(v) : def;
+}
+} // namespace
+
 void ChatServer::initialize() {
     std::cout << "ChatServer initialize start  ! " << std::endl;
-	http::MysqlUtil::init("tcp://127.0.0.1:3306", "root", "123456", "ChatHttpServer", 5);
+    std::string mysqlHost = envOr("MYSQL_HOST", "127.0.0.1");
+    std::string mysqlPort = envOr("MYSQL_PORT", "3306");
+    http::MysqlUtil::init(
+        "tcp://" + mysqlHost + ":" + mysqlPort,
+        envOr("MYSQL_USER", "root"),
+        envOr("MYSQL_PASSWORD", "123456"),
+        envOr("MYSQL_DATABASE", "ChatHttpServer"),
+        5);
 
     initializeSession();
 
@@ -130,6 +146,9 @@ void ChatServer::initializeRouter() {
     httpServer_.Get("/chat", std::make_shared<ChatHandler>(this));
 
     httpServer_.Post("/chat/send", std::make_shared<ChatSendHandler>(this));
+
+    // SSE 流式对话
+    httpServer_.Post("/chat/send-stream", std::make_shared<ChatStreamHandler>(this));
  
     httpServer_.Get("/menu", std::make_shared<AIMenuHandler>(this));
     
