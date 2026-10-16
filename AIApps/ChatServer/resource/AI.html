@@ -511,6 +511,121 @@
             questionInput.focus();
         });
 
+        // ---------- 流式发送（SSE）----------
+        // 统一走 /chat/send-stream：支持流式的模型（通义/DeepSeek）逐帧渲染，
+        // RAG/MCP 在服务端退化为一次性全量回调，前端协议保持一致
+        async function streamSend(question) {
+            if (chatContainer.querySelector('.empty-state')) chatContainer.innerHTML = '';
+
+            // 先建一个空的 AI 气泡，增量填充
+            const row = document.createElement('div');
+            row.className = 'msg-row assistant';
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar ai';
+            avatar.textContent = '✦';
+            const wrap = document.createElement('div');
+            wrap.className = 'bubble-wrap';
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+            wrap.appendChild(bubble);
+            row.appendChild(avatar);
+            row.appendChild(wrap);
+            chatContainer.appendChild(row);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            const finalize = (text) => {
+                if (String(text).startsWith('[错误]')) bubble.classList.add('err');
+                bubble.innerHTML = renderMarkdown(text);
+                const actions = document.createElement('div');
+                actions.className = 'msg-actions';
+                const ttsBtn = document.createElement('button');
+                ttsBtn.type = 'button';
+                ttsBtn.className = 'icon-btn';
+                ttsBtn.textContent = '▶ 朗读';
+                ttsBtn.onclick = () => playTTS(ttsBtn, text);
+                actions.appendChild(ttsBtn);
+                wrap.appendChild(actions);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+                return text;
+            };
+
+            const payload = { question, modelType: modelTypeSelect.value };
+            if (!tempSession && currentSessionId) payload.sessionId = currentSessionId;
+
+            let full = '', sid = null, streamErr = null;
+            try {
+                const response = await fetch('/chat/send-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const ct = response.headers.get('content-type') || '';
+                if (!response.ok || !ct.includes('text/event-stream')) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.message || ('HTTP ' + response.status));
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buf = '';
+                let frameDone = false;
+                while (!frameDone) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buf += decoder.decode(value, { stream: true });
+                    let idx;
+                    while ((idx = buf.indexOf('\n\n')) !== -1) {
+                        const frame = buf.slice(0, idx);
+                        buf = buf.slice(idx + 2);
+                        if (!frame.startsWith('data:')) continue;
+                        const data = frame.slice(5).trim();
+                        if (data === '[DONE]') { frameDone = true; continue; }
+                        let ev;
+                        try { ev = JSON.parse(data); } catch (e) { continue; }
+                        if (ev.sessionId) {
+                            sid = String(ev.sessionId);
+                        }
+                        else if (ev.delta) {
+                            full += ev.delta;
+                            bubble.textContent = full;
+                            chatContainer.scrollTop = chatContainer.scrollHeight;
+                        }
+                        else if (ev.error) {
+                            streamErr = ev.error;
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                console.error(err);
+                streamErr = '无法连接到服务器';
+            }
+
+            if (streamErr) full = '[错误] ' + streamErr;
+            if (!full) full = '[错误] 模型返回为空';
+            finalize(full);
+
+            // 会话登记（与旧路径一致）
+            if (sid) {
+                sessions[sid] = {
+                    name: question.slice(0, 12) || '新会话',
+                    messages: [
+                        { role: 'user', content: question },
+                        { role: 'assistant', content: full }
+                    ]
+                };
+                currentSessionId = sid;
+                tempSession = false;
+                chatTitle.textContent = sessions[sid].name;
+                renderSessionList();
+            }
+            else if (!tempSession && currentSessionId && sessions[currentSessionId]) {
+                sessions[currentSessionId].messages.push({ role: 'user', content: question });
+                sessions[currentSessionId].messages.push({ role: 'assistant', content: full });
+            }
+        }
+
         // ---------- 发送 ----------
         function setSending(on) {
             sending = on;
@@ -525,11 +640,19 @@
             if (!question) return;
 
             appendMessage('user', question);
-            showTyping();
             setSending(true);
             questionInput.value = '';
             questionInput.style.height = 'auto';
 
+            // 统一走流式端点：打字指示即流式气泡的初始状态
+            await streamSend(question);
+            setSending(false);
+            questionInput.focus();
+        });
+
+        // —— 旧的非流式路径保留备用（API 兼容），当前统一走 streamSend ——
+        async function legacySend(question) {
+            showTyping();
             try {
                 if (tempSession) {
                     const response = await fetch('/chat/send-new-session', {
@@ -580,7 +703,7 @@
                 setSending(false);
                 questionInput.focus();
             }
-        });
+        }
 
         // Enter 发送 / Shift+Enter 换行；输入框自动增高
         questionInput.addEventListener('keydown', e => {

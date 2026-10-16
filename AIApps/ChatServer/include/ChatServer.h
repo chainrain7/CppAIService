@@ -64,6 +64,7 @@ private:
 	friend class ChatCreateAndSendHandler;
 	friend class ChatSessionsHandler;
 	friend class ChatSpeechHandler;
+	friend class ChatStreamHandler;
 
 private:
 	void initialize();

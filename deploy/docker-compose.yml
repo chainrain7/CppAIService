@@ -2,8 +2,6 @@ services:
   mysql:
     image: mysql:8.0
     container_name: cppai-mysql
-    # 密码与 ChatServer.cpp:37 写死的 "root"/"123456" 保持一致；
-    # 若你改了这里的密码，记得同步改代码
     environment:
       MYSQL_ROOT_PASSWORD: "123456"
       MYSQL_DATABASE: "ChatHttpServer"
@@ -30,6 +28,36 @@ services:
       - "15672:15672"   # 管理界面：浏览器打开 http://localhost:15672 (guest/guest)
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+  # 应用本体：docker compose up --profile app 一条命令全栈拉起。
+  # 只想要中间件时不带 --profile app 即可（默认只起 mysql/rabbitmq）
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: cppai-app:latest
+    container_name: cppai-app
+    profiles: ["app"]
+    depends_on:
+      - mysql
+      - rabbitmq
+    environment:
+      # 容器互联：连中间件用服务名而不是 localhost
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: "123456"
+      MYSQL_DATABASE: ChatHttpServer
+      # 模型密钥按需注入（也可用 env_file）
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      BAIDU_CLIENT_ID: ${BAIDU_CLIENT_ID:-}
+      BAIDU_CLIENT_SECRET: ${BAIDU_CLIENT_SECRET:-}
+      Knowledge_Base_ID: ${Knowledge_Base_ID:-}
+      AI_CONTEXT_WINDOW: ${AI_CONTEXT_WINDOW:-20}
+    ports:
+      - "8080:8080"
     restart: unless-stopped
 
 volumes:
