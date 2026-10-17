@@ -46,50 +46,72 @@ void ChatSpeechHandler::handle(const http::HttpRequest& req, http::HttpResponse*
 
         const char* secretEnv = std::getenv("BAIDU_CLIENT_SECRET");
         const char* idEnv = std::getenv("BAIDU_CLIENT_ID");
+        const char* dashEnv = std::getenv("DASHSCOPE_API_KEY");
 
-        if (!secretEnv) throw std::runtime_error("BAIDU_CLIENT_SECRET not found!");
-        if (!idEnv) throw std::runtime_error("BAIDU_CLIENT_ID not found!");
+        if (!secretEnv && !dashEnv) throw std::runtime_error("未配置任何 TTS 密钥（DASHSCOPE_API_KEY 或 BAIDU_CLIENT_ID/SECRET）");
 
-        std::string clientSecret(secretEnv);
-        std::string clientId(idEnv);
+        std::string clientSecret(secretEnv ? secretEnv : "");
+        std::string clientId(idEnv ? idEnv : "");
+        bool hasBaidu = secretEnv && idEnv;
 
-        // TTS 是「建任务→轮询→取 URL」的秒级链路，不能占 muduo IO 线程：
-        // 移交业务线程池，工作线程完成后经 TcpConnection 异步回包
+        // TTS 是秒级网络链路，不能占 muduo IO 线程：
+        // 移交业务线程池，工作线程完成后经 TcpConnection 异步回包。
+        // 主通道 DashScope（直接回 mp3 音频流）；百度任务制作为备用（回 JSON url）
         auto conn = req.getConnection();
         std::string version = req.getVersion();
 
         BizThreadPool::instance().enqueue(
-            [conn, clientId, clientSecret, text, version]()
+            [conn, clientId, clientSecret, hasBaidu, dashEnv, text, version]()
             {
-                std::string bodyStr;
-                http::HttpResponse::HttpStatusCode code = http::HttpResponse::k200Ok;
-                std::string statusMsg = "OK";
-                try
-                {
-                    AISpeechProcessor speechProcessor(clientId, clientSecret);
-                    std::string speechUrl = speechProcessor.synthesize(text,
-                                                                       "mp3-16k",
-                                                                       "zh",
-                                                                       5,
-                                                                       5,
-                                                                       5);
-                    json successResp;
-                    successResp["success"] = true;
-                    successResp["url"] = speechUrl;
-                    bodyStr = successResp.dump(4);
-                }
-                catch (const std::exception& e)
-                {
-                    json failureResp;
-                    failureResp["status"] = "error";
-                    failureResp["message"] = e.what();
-                    bodyStr = failureResp.dump(4);
-                    code = http::HttpResponse::k500InternalServerError;
-                    statusMsg = "Internal Server Error";
+                std::string speechUrl;
+
+                // 主通道：DashScope（qwen3-tts-flash），复用现有密钥
+                if (dashEnv) {
+                    try {
+                        speechUrl = AISpeechProcessor::synthesizeDashscope(text);
+                    }
+                    catch (const std::exception& e) {
+                        std::cerr << "[TTS] DashScope 失败，转百度备用: " << e.what() << std::endl;
+                    }
                 }
 
+                // 备用：百度任务制 TTS
+                if (speechUrl.empty()) {
+                    try {
+                        if (!hasBaidu) {
+                            throw std::runtime_error("TTS 均不可用（DashScope 失败且未配置百度密钥）");
+                        }
+                        AISpeechProcessor speechProcessor(clientId, clientSecret);
+                        speechUrl = speechProcessor.synthesize(text, "mp3-16k", "zh", 5, 5, 5);
+                    }
+                    catch (const std::exception& e) {
+                        json failureResp;
+                        failureResp["status"] = "error";
+                        failureResp["message"] = e.what();
+                        std::string failureBody = failureResp.dump(4);
+
+                        http::HttpResponse response(false);
+                        response.setStatusLine(version, http::HttpResponse::k500InternalServerError, "Internal Server Error");
+                        response.setCloseConnection(true);
+                        response.setContentType("application/json");
+                        response.setContentLength(failureBody.size());
+                        response.setBody(failureBody);
+                        response.addHeader("Access-Control-Allow-Origin", "*");
+
+                        muduo::net::Buffer buf;
+                        response.appendToBuffer(&buf);
+                        conn->send(&buf);
+                        return;
+                    }
+                }
+
+                json successResp;
+                successResp["success"] = true;
+                successResp["url"] = speechUrl;
+                std::string bodyStr = successResp.dump(4);
+
                 http::HttpResponse response(false);
-                response.setStatusLine(version, code, statusMsg);
+                response.setStatusLine(version, http::HttpResponse::k200Ok, "OK");
                 response.setCloseConnection(false);
                 response.setContentType("application/json");
                 response.setContentLength(bodyStr.size());

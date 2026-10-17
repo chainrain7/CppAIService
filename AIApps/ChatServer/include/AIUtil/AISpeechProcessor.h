@@ -28,7 +28,11 @@ public:
     std::string recognize(const std::string& speechData,const std::string& format = "pcm",int rate = 16000,int channel = 1);
 
     // 语音合成
-    std::string synthesize(const std::string& text,const std::string& format = "mp3-16k",const std::string& lang = "zh",int speed = 5,int pitch = 5,int volume = 5); 
+    std::string synthesize(const std::string& text,const std::string& format = "mp3-16k",const std::string& lang = "zh",int speed = 5,int pitch = 5,int volume = 5);
+
+    // 阿里 DashScope 语音合成（sambert）：一次 POST 直接返回 mp3 音频字节，
+    // 复用 DASHSCOPE_API_KEY，无任务轮询、无独立额度——作为 TTS 主通道
+    static std::string synthesizeDashscope(const std::string& text);
 
 
 private:

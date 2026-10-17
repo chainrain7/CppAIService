@@ -367,6 +367,15 @@
             btn.textContent = '◉ 播放中';
             try {
                 const res = await fetch('/chat/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+                const ct = res.headers.get('content-type') || '';
+                if (res.ok && ct.startsWith('audio/')) {
+                    // 主通道：DashScope 直接返回音频流
+                    const blob = await res.blob();
+                    const audio = new Audio(URL.createObjectURL(blob));
+                    audio.onended = () => { btn.classList.remove('playing'); btn.textContent = '▶ 朗读'; };
+                    audio.play();
+                    return;
+                }
                 const data = await res.json();
                 if (data.success && data.url) {
                     const audio = new Audio(data.url);

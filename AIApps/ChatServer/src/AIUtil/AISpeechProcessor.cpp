@@ -57,9 +57,79 @@ std::string AISpeechProcessor::getAccessToken() {
 }
 
 
+// 阿里 DashScope 语音合成（qwen3-tts-flash，SSE 流式）：
+// 逐帧返回 base64 音频，最后一帧携带完整 wav 的 OSS URL——只需提取该 URL
+std::string AISpeechProcessor::synthesizeDashscope(const std::string& text) {
+    const char* keyEnv = std::getenv("DASHSCOPE_API_KEY");
+    if (!keyEnv || !*keyEnv) {
+        throw std::runtime_error("DASHSCOPE_API_KEY not found!");
+    }
+
+    std::string body = json{
+        {"model", "qwen3-tts-flash"},
+        {"input", {
+            {"text", text},
+            {"voice", "Cherry"},
+            {"language_type", "Chinese"},
+        }},
+    }.dump();
+
+    std::string resp;
+    CURL* curl = curl_easy_init();
+    if (!curl) throw std::runtime_error("curl init failed");
+
+    struct curl_slist* headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, ("Authorization: Bearer " + std::string(keyEnv)).c_str());
+    headers = curl_slist_append(headers, "X-DashScope-SSE: enable");
+
+    curl_easy_setopt(curl, CURLOPT_URL,
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onWriteData);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
+    applySafetyOpts(curl, 60L);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    if (headers) curl_slist_free_all(headers);
+
+    if (res != CURLE_OK) {
+        throw std::runtime_error("DashScope TTS 请求失败: " + std::string(curl_easy_strerror(res)));
+    }
+
+    // 逐行解析 SSE 帧，取最后出现的 output.audio.url
+    std::string url;
+    std::string errMsg;
+    size_t pos = 0;
+    while (pos < resp.size()) {
+        size_t eol = resp.find('\n', pos);
+        std::string line = resp.substr(pos, (eol == std::string::npos ? resp.size() : eol) - pos);
+        pos = (eol == std::string::npos) ? resp.size() : eol + 1;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.rfind("data:", 0) != 0) continue;
+        std::string data = line.substr(5);
+        if (!data.empty() && data.front() == ' ') data.erase(0, 1);
+        try {
+            json j = json::parse(data);
+            if (j.contains("message") && errMsg.empty()) errMsg = j["message"].get<std::string>();
+            if (j.contains("output") && j["output"].contains("audio")
+                && j["output"]["audio"].contains("url")
+                && j["output"]["audio"]["url"].is_string()) {
+                std::string u = j["output"]["audio"]["url"].get<std::string>();
+                if (!u.empty()) url = u;   // 保留最后出现的 url（完整文件）
+            }
+        }
+        catch (...) { /* 跳过非完整 JSON 行 */ }
+    }
+
+    if (!url.empty()) return url;
+    throw std::runtime_error("DashScope TTS 失败: " + (errMsg.empty() ? resp.substr(0, 200) : errMsg));
+}
+
 // 语音识别
-std::string AISpeechProcessor::recognize(const std::string& speechData,
-                                         const std::string& format,
+std::string AISpeechProcessor::recognize(const std::string& speechData,                                         const std::string& format,
                                          int rate,
                                          int channel) 
 {

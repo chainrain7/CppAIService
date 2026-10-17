@@ -2,12 +2,12 @@
 
 #include <fstream>
 
-// 模型路径可用环境变量 ONNX_MODEL_PATH 指定，缺省为默认位置
+// 模型与标签路径可用环境变量覆盖，默认取仓库 models/ 目录（服务器须在 build/ 下启动）
 static std::string resolveModelPath() {
     const char* envPath = std::getenv("ONNX_MODEL_PATH");
     std::string modelPath = (envPath && *envPath)
         ? std::string(envPath)
-        : "/root/models/mobilenetv2/mobilenetv2-7.onnx";
+        : "../models/mobilenetv2-7.onnx";
 
     std::ifstream f(modelPath.c_str());
     if (!f.good()) {
@@ -15,6 +15,20 @@ static std::string resolveModelPath() {
                                  "（可通过环境变量 ONNX_MODEL_PATH 指定）");
     }
     return modelPath;
+}
+
+static std::string resolveLabelPath() {
+    const char* envPath = std::getenv("ONNX_LABEL_PATH");
+    std::string labelPath = (envPath && *envPath)
+        ? std::string(envPath)
+        : "../models/imagenet_classes.txt";
+
+    std::ifstream f(labelPath.c_str());
+    if (!f.good()) {
+        throw std::runtime_error("标签文件不存在: " + labelPath +
+                                 "（可通过环境变量 ONNX_LABEL_PATH 指定）");
+    }
+    return labelPath;
 }
 
 
@@ -47,7 +61,7 @@ void AIUploadSendHandler::handle(const http::HttpRequest& req, http::HttpRespons
 
                 server_->ImageRecognizerMap.emplace(
                     userId,
-                    std::make_shared<ImageRecognizer>(resolveModelPath())
+                    std::make_shared<ImageRecognizer>(resolveModelPath(), resolveLabelPath())
                 );
             }
             ImageRecognizerPtr = server_->ImageRecognizerMap[userId];
