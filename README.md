@@ -19,7 +19,7 @@ C++ 没有 LangChain、Spring AI 那样现成的 AI 应用生态，HTTP 封装�
 | SSE 流式输出 | `POST /chat/send-stream` | 服务端逐帧转发大模型增量（`text/event-stream`），前端 `fetch` + `ReadableStream` 打字机式渲染；RAG/MCP 自动退化为单次全量，协议统一 |
 | 上下文窗口管理 | `AIHelper::contextWindow` | 发给模型的只保留最近 N 条（默认 20，`AI_CONTEXT_WINDOW` 可配），起始下标对齐偶数保证角色交替正确 |
 | 安全加固 | 注册/登录 + 参数校验 | 注册走预处理语句（杜绝 SQL 注入），密码 SHA256(用户名做盐) 哈希入库，请求参数前置校验统一 400 |
-| 语音链路 | `AIApps/ChatServer/*/**/AISpeechProcessor.*` | 百度 TTS（建任务 → 轮询 → 取音频 URL）+ ASR 接口封装 |
+| 语音链路 | `AIApps/ChatServer/*/**/AISpeechProcessor.*` | TTS 主通道 DashScope qwen3-tts-flash（SSE 流式调用，返回音频 URL，复用对话密钥），百度任务制 TTS 自动备用；ASR 接口封装 |
 | 图像识别 | `AIApps/ChatServer/*/**/ImageRecognizer.*` | ONNX Runtime + OpenCV 预处理，本地推理，不依赖云端视觉 API |
 | 容器化交付 | `Dockerfile` + `deploy/docker-compose.yml` | 应用多阶段构建（builder 编译 / runtime 只带运行库，镜像数百 MB），MySQL + RabbitMQ + 应用可一条命令全栈拉起 |
 
@@ -115,7 +115,7 @@ DASHSCOPE_API_KEY=sk-xxx DEEPSEEK_API_KEY=sk-xxx docker compose --profile app up
 ```bash
 export DASHSCOPE_API_KEY=sk-xxx        # 百炼通义 / RAG / MCP 策略
 export DEEPSEEK_API_KEY=sk-xxx         # DeepSeek 策略
-export BAIDU_CLIENT_ID=xxx             # 百度 ASR / TTS
+export BAIDU_CLIENT_ID=xxx             # 可选：百度 TTS 备用通道（主通道走 DASHSCOPE_API_KEY）
 export BAIDU_CLIENT_SECRET=xxx
 export Knowledge_Base_ID=xxx           # 百炼 RAG 知识库 ID（不用 RAG 可不配）
 ```
@@ -142,7 +142,7 @@ cmake .. && make -j$(nproc)
 | POST | `/chat/send-new-session` | 新建会话并发送首条消息 |
 | GET | `/chat/sessions` | 该用户的会话列表 |
 | POST | `/chat/history` | 拉取指定会话的历史消息 |
-| POST | `/chat/tts` | 文本转语音（百度 TTS） |
+| POST | `/chat/tts` | 文本转语音（DashScope 主通道 / 百度备用） |
 | GET | `/menu` | 功能菜单页 |
 | GET | `/upload`、POST `/upload/send` | 图像上传与本地识别 |
 
@@ -213,7 +213,7 @@ Handler 不直接写库，而是把消息发布到 `sql_queue`；`main.cpp` 启�
 - **数据库连接**环境变量：`MYSQL_HOST`（默认 127.0.0.1）、`MYSQL_PORT`（3306）、`MYSQL_USER`（root）、`MYSQL_PASSWORD`（123456）、`MYSQL_DATABASE`（ChatHttpServer）——容器部署时指向服务名 `mysql`。
 - **上下文窗口**：`AI_CONTEXT_WINDOW`（默认 20 条 = 10 轮问答）。
 - **密码存储**：`SHA256(username::password)`（用户名做盐）哈希后入库，库中不落明文。
-- **图像识别模型**：路径由环境变量 `ONNX_MODEL_PATH` 指定（默认 `/root/models/mobilenetv2/mobilenetv2-7.onnx`），文件缺失时接口返回明确错误而不是模糊异常。
+- **图像识别模型**：mobilenetv2-7 与 ImageNet 标签已随仓库附带（`models/` 目录），clone 即可演示；路径可用环境变量 `ONNX_MODEL_PATH` / `ONNX_LABEL_PATH` 覆盖，文件缺失时接口返回明确错误而不是模糊异常。
 - **`AIApps/ChatServer/resource/config.json`**：工具清单（`tools`）与两段式推理的 Prompt 模板（`prompt_template`）。
 
 ## 已知问题与改进计划
